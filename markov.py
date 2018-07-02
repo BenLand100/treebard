@@ -66,16 +66,25 @@ class MarkovChain:
             for depth in range(1,5):
                 create_ngram_table(c,depth)
         self.tknzr = TweetTokenizer()
+        self.txn = None
+
+    def begin(self):
+        self.txn = self.conn.cursor()
+        self.txn.execute('BEGIN TRANSACTION;')
 
     def process(self,text):
         start = time.time()
         tokens = self.tknzr.tokenize(text)
-        c = self.conn.cursor()
+        c = self.conn.cursor() if self.txn is None else self.txn
         maxlen = len(tokens)
         ngrams = [[(tokens[i:i+j+1] if i+j+1 <= maxlen else tokens[i:i+j]+[None])for i in range(maxlen+1-j)] for j in range(1,5)]
-        add_ngrams(self.conn.cursor(),ngrams)
+        add_ngrams(self.conn.cursor(),ngrams,commit=(self.txn is None))
         end = time.time()
-        print('Processed in:',end-start)
+        
+    def commit(self):
+        if self.txn:
+            self.txn.execute('COMMIT;')
+            self.txn = None
         
     def extend(self,seed,min_choices=2,start_depth=4):
         if start_depth > len(seed):

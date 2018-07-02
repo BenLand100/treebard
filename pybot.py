@@ -1,4 +1,5 @@
 import re
+import os
 import json
 import socket
 import string
@@ -90,6 +91,7 @@ class IRCBot:
         self.giphy_last = ''
         self.giphy_last_count = 0
         
+        self.mc_learning = True
         self.mc = markov.MarkovChain()
         self.reply_prob = 0.05
         
@@ -112,6 +114,7 @@ class IRCBot:
         self.register_cmd('DO',0,self.cmd_do)
         self.register_cmd('GIPHY',0,self.cmd_giphy)
         self.register_cmd('CHATTINESS',50,self.cmd_chattiness)
+        self.register_cmd('PROFILE',50,self.cmd_profile)
         
         self.msg_hooks = []
         self.register_hook(self.hook_youtube)
@@ -179,7 +182,20 @@ class IRCBot:
     def cmd_do(self,c,msg,replyto,params):
         if params is not None:
             c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
-            
+    
+    def cmd_profile(self,c,msg,replyto,params):
+        if params is None or len(params) == 0:
+            self.mc = markov.MarkovChain()
+            self.mc_learning = True
+            c.send('PRIVMSG',replyto,rest='Now chatting and learning')
+        else:
+            path = '%s.sqlite' % params.lower()
+            print(path)
+            if os.path.exists(path):
+                self.mc = markov.MarkovChain(path)
+                self.mc_learning = False
+                c.send('PRIVMSG',replyto,rest='Now chatting like %s' % params)
+    
     def cmd_chattiness(self,c,msg,replyto,params):
         try:
             self.reply_prob = float(params)
@@ -263,7 +279,8 @@ class IRCBot:
             
     
     def hook_markov(self,c,msg,replyto,text):
-        self.mc.process(text)
+        if self.mc_learning:
+            self.mc.process(text)
         if random.random() < self.reply_prob or self.nick.upper() in text.upper():
             seed_text = re.sub(self.nick+'[;,: ]*|<\w+>','',text,flags=re.IGNORECASE)
             reply = self.mc.gen_reply(seed_text)
