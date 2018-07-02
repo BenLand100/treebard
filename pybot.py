@@ -293,9 +293,7 @@ class IRCBot:
                 cmd = cmd.upper()
                 if cmd in self.cmds:
                     req,handler = self.cmds[cmd]
-                    print(req)
                     lvl = self.acl_level(src)
-                    print(lvl)
                     if req <= lvl:
                         try:
                             handler(c,msg,replyto,params[0] if len(params) > 0 else None)
@@ -303,7 +301,10 @@ class IRCBot:
                             traceback.print_exc()
             else: #regular messages
                 for hook in self.msg_hooks:
-                    hook(c,msg,replyto,text)
+                    try:
+                        hook(c,msg,replyto,text)
+                    except:
+                        traceback.print_exc()
 
     def handle_ping(self,c,msg):
         c.send('PONG',*msg.args)
