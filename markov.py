@@ -85,6 +85,8 @@ class MarkovChain:
             opts = get_next(c,seed[-depth:])
             if depth > 1 and len(opts) < min_choices:
                 continue
+            if depth == 1 and len(opts) == 0:
+                return None
             weights = [weight for token,weight in opts]
             tokens = [token for token,weight in opts]
             return choices(tokens,weights)[0]
