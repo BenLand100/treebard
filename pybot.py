@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 import markov
 import random
+import traceback
 
 from collections import deque
 
@@ -143,7 +144,10 @@ class IRCBot:
     def acl_level(self,nick,newlvl=None):
         nick = nick.upper()
         if newlvl is not None:
-            self.acl[nick] = newlvl
+            try:
+                self.acl[nick] = int(newlvl)
+            except:
+                pass
         return self.acl[nick] if nick in self.acl else 0
         
     ### CTCP handlers
@@ -193,8 +197,8 @@ class IRCBot:
             usrlvl = self.acl_level(strip_prefix(msg.prefix))
             setlvl = int(args[1])
             if setlvl < usrlvl:
-                self.acl_level(args[0],setlvl)
-                c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],setlvl))
+                usrlvl = self.acl_level(args[0],setlvl)
+                c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],usrlvl))
 
     def cmd_giphy(self,c,msg,replyto,params):
         if self.giphy_key is None:
@@ -280,7 +284,10 @@ class IRCBot:
                 ctcp,*params = text.strip('\x01').split(' ',1)
                 ctcp = ctcp.upper()
                 if ctcp in self.ctcp_handlers:
-                    self.ctcp_handlers[ctcp](c,msg,replyto,params[0] if len(params) else None)
+                    try:
+                        self.ctcp_handlers[ctcp](c,msg,replyto,params[0] if len(params) else None)
+                    except:
+                        traceback.print_exc()
             elif text[0] == '.': #commands
                 cmd,*params = text[1:].split(' ',1)
                 cmd = cmd.upper()
@@ -290,7 +297,10 @@ class IRCBot:
                     lvl = self.acl_level(src)
                     print(lvl)
                     if req <= lvl:
-                        handler(c,msg,replyto,params[0] if len(params) > 0 else None)
+                        try:
+                            handler(c,msg,replyto,params[0] if len(params) > 0 else None)
+                        except:
+                            traceback.print_exc()
             else: #regular messages
                 for hook in self.msg_hooks:
                     hook(c,msg,replyto,text)
