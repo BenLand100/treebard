@@ -67,7 +67,7 @@ class IRCConnection:
     def recv(self):
         if len(self.pending) > 0:
             return IRCMessage(self.pending.popleft())
-        self.buff = self.buff + self.s.recv(1024).decode('UTF-8')
+        self.buff = self.buff + self.s.recv(1024).decode('UTF-8',errors='ignore')
         parts = self.buff.split('\r\n')
         self.buff = parts.pop() 
         self.pending.extend(parts)
