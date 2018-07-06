@@ -100,21 +100,21 @@ class IRCChannel:
         self.mc_learning = False
         self.reply_prob = 0.01
         
-    def add_badword(self,c,word,style=''):
+    def add_badword(self,word,style=''):
         word = word.lower()
         if style == '':
             self.badwords.add(word)
         elif style == 'single':
-            self.badwords.add('\s%s$|^%s\s|^%s$' % (word,word,word,word))
+            self.badwords.add('\s%s\s|\s%s$|^%s\s|^%s$' % (word,word,word,word))
         elif style == 'start':
-            self.badwords.add('\s%s|^%s' % (b,b))
-        self.update_badwords(c)
+            self.badwords.add('\s%s|^%s' % (word,word))
         
     def update_badwords(self,c):
         expr = '|'.join(self.badwords)
         key = self.name.upper()
+        print(key,expr) 
         if len(expr) > 0:
-            c.filter_re_map[key] = re.compile()
+            c.filter_re_map[key] = re.compile(expr)
         elif key in c.filter_re_map:
             del c.filter_re_map[key]
 
