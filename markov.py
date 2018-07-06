@@ -58,16 +58,30 @@ def get_next(c,seed):
 
 class MarkovChain:
     def __init__(self,dbfile='markov.sqlite'):
-        if os.path.exists(dbfile):
-            self.conn = apsw.Connection(dbfile)
+        self.dbfile = dbfile
+        self._init()
+        
+    def _init(self):
+        self.tknzr = TweetTokenizer()
+        if os.path.exists(self.dbfile):
+            self.conn = apsw.Connection(self.dbfile)
         else:
-            self.conn = apsw.Connection(dbfile)
+            self.conn = apsw.Connection(self.dbfile)
             c = self.conn.cursor()
             for depth in range(1,5):
                 create_ngram_table(c,depth)
-        self.tknzr = TweetTokenizer()
         self.txn = None
-
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['txn']
+        del state['conn']
+        return state
+        
+    def __setstate__(self,state):
+        self.__dict__.update(state)
+        self._init()
+        
     def begin(self):
         self.txn = self.conn.cursor()
         self.txn.execute('BEGIN TRANSACTION;')

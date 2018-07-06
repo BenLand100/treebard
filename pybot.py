@@ -78,23 +78,59 @@ def strip_prefix(prefix):
         nick,*_ = prefix.split('!')
         return nick
     return prefix
-
-class IRCBot:
-
-    def __init__(self,master='BenLand100',giphy_key=None):
-        self.nick = None
     
-        self.acl = {master.upper():1000}
-        self.histories = {}
+class IRCChannel:
+
+    def __init__(self,name):
+        self.name = name
         
-        self.giphy_key = giphy_key
+        self.history = deque(maxlen=100)
+        
         self.giphy_last = ''
         self.giphy_last_count = 0
         
-        self.mc_learning = True
-        self.mc = markov.MarkovChain()
-        self.reply_prob = 0.05
+        self.mc = None
+        self.mc_learning = False
+        self.reply_prob = 0.01
+
+class IRCBot:
+
+    def __init__(self,master='BenLand100',giphy_key=None,nick=None,ident=None,realname=None,filter_re=None,autojoin=None):
+        self.nick = nick
+        self.ident = ident
+        self.realname = realname
+        self.filter_re = filter_re
+        self.autojoin = autojoin
+    
+        self.acl = {master.upper():1000}
+        self.giphy_key = giphy_key
+        self.chans = {}
+
+        self._default_handlers()
         
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['handlers']
+        del state['ctcp_handlers']
+        del state['msg_hooks']
+        del state['cmds']
+        del state['conn']
+        return state
+        
+    def __setstate__(self,state):
+        self.__dict__.update(state)
+        self._default_handlers()
+        
+    def get_chan(self,chan,create=True):
+        key = chan.upper()
+        if key in self.chans:
+            return self.chans[key]
+        elif create:
+            self.chans[key] = IRCChannel(chan)
+            return self.chans[key]
+        return None
+        
+    def _default_handlers(self):
         self.handlers = {}
         self.register_handler('PING',self.handle_ping)
         self.register_handler('PRIVMSG',self.handle_privmsg)
@@ -121,17 +157,17 @@ class IRCBot:
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    def connect(self,host,port,nick='Treebard',ident='pybot',realname='Fangorn',filter_re=None,autojoin=None):
-        self.autojoin = autojoin
-        self.conn = IRCConnection(host,port,filter_re=filter_re)
-        self.conn.send('NICK',nick)
-        self.conn.send('USER',ident,host,'*',rest=realname)
+    def connect(self,host,port):
+        if not (self.nick and self.ident and self.realname):
+            raise RuntimeError('must specify nick, ident, and realname to connect')
+        self.conn = IRCConnection(host,port,filter_re=self.filter_re)
+        self.conn.send('NICK',self.nick)
+        self.conn.send('USER',self.ident,host,'*',rest=self.realname)
         while True:
             msg = self.conn.recv()
             if msg.cmd in self.handlers:
                 self.handlers[msg.cmd](self.conn,msg)
         
-            
     def register_handler(self,cmd,func):
         self.handlers[cmd.upper()] = func
         
@@ -156,7 +192,7 @@ class IRCBot:
     ### CTCP handlers
 
     def ctcp_version(self,c,msg,replyto,params):
-        c.send('NOTICE',replyto,rest='\x01VERSION pybot\x01')
+        c.send('NOTICE',replyto,rest='\x01VERSION %s\x01'%self.ident)
 
     def ctcp_ping(self,c,msg,replyto,params):
         c.send('NOTICE',replyto,rest='\x01PING %s\x01'%params)
@@ -184,24 +220,28 @@ class IRCBot:
             c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
     
     def cmd_profile(self,c,msg,replyto,params):
-        if params is None or len(params) == 0:
-            self.mc = markov.MarkovChain()
-            self.mc_learning = True
+        chan = self.get_chan(replyto)
+        params = params.strip() if params is not None else ''
+        if len(params) == 0:
+            chan.mc = None
+            chan.mc_learning = False
+            c.send('PRIVMSG',replyto,rest='Chatting deactivated')
+        elif params == 'learn':
+            chan.mc = markov.MarkovChain()
+            chan.mc_learning = True
             c.send('PRIVMSG',replyto,rest='Now chatting and learning')
         else:
             path = '%s.sqlite' % params.lower()
-            print(path)
             if os.path.exists(path):
-                self.mc = markov.MarkovChain(path)
-                self.mc_learning = False
+                chan.mc = markov.MarkovChain(path)
+                chan.mc_learning = False
+                print(replyto)
                 c.send('PRIVMSG',replyto,rest='Now chatting like %s' % params)
     
     def cmd_chattiness(self,c,msg,replyto,params):
-        try:
-            self.reply_prob = float(params)
-            c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%self.reply_prob)
-        except:
-            pass
+        chan = self.get_chan(replyto)
+        chan.reply_prob = float(params)
+        c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%chan.reply_prob)
             
     def cmd_access(self,c,msg,replyto,params):
         if params is None:
@@ -219,11 +259,12 @@ class IRCBot:
     def cmd_giphy(self,c,msg,replyto,params):
         if self.giphy_key is None:
             return
-        if params == self.giphy_last:
-            self.giphy_last_count = self.giphy_last_count + 1
-            args = urllib.parse.urlencode({'api_key':self.giphy_key,'q':params,'limit':1,'offset':self.giphy_last_count})
+        chan = self.get_chan(replyto)
+        if params == chan.giphy_last:
+            chan.giphy_last_count = chan.giphy_last_count + 1
+            args = urllib.parse.urlencode({'api_key':self.giphy_key,'q':params,'limit':1,'offset':chan.giphy_last_count})
         else:
-            self.giphy_last = params
+            chan.giphy_last = params
             args = urllib.parse.urlencode({'api_key':self.giphy_key,'q':params,'limit':1})
         url = 'https://api.giphy.com/v1/gifs/search?%s' % args
         with urllib.request.urlopen(url) as req:
@@ -251,10 +292,8 @@ class IRCBot:
     sed_re_iter = re.compile('(?:^|;)s(.)(.+?)\\1(.*?)\\1([gi0-9]*)')
     def hook_sed(self,c,msg,replyto,text,action=False):
         match = IRCBot.sed_re.fullmatch(text)
-        key = replyto.upper()
-        if key not in self.histories:
-            self.histories[key] = deque(maxlen=100)
-        history = self.histories[key]
+        chan = self.get_chan(replyto)
+        history = chan.history
         if match:
             messageidx = None
             for expr_match in IRCBot.sed_re_iter.finditer(text):
@@ -279,11 +318,15 @@ class IRCBot:
             
     
     def hook_markov(self,c,msg,replyto,text):
-        if self.mc_learning:
-            self.mc.process(text)
-        if random.random() < self.reply_prob or self.nick.upper() in text.upper():
+        chan = self.get_chan(replyto)
+        print(replyto)
+        if chan.mc is None:
+            return
+        if chan.mc_learning:
+            chan.mc.process(text)
+        if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
             seed_text = re.sub(self.nick+'[;,: ]*|<\w+>','',text,flags=re.IGNORECASE)
-            reply = self.mc.gen_reply(seed_text)
+            reply = chan.mc.gen_reply(seed_text)
             if reply:
                 c.send('PRIVMSG',replyto,rest=reply)
 
@@ -328,6 +371,11 @@ class IRCBot:
 
     def handle_init(self,c,msg):
         self.nick = msg.args[0]
+        print(list(self.chans.keys()))
+        join_chans = set([chan for chan in self.chans.keys() if chan[0] in ['#','&','$']])
         if self.autojoin:
-            c.send('JOIN',self.autojoin)
+            join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
+        if len(join_chans) > 0:
+            arg = ','.join(join_chans)
+            c.send('JOIN',arg)
         
