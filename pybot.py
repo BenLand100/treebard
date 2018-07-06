@@ -100,17 +100,25 @@ class IRCChannel:
         self.mc_learning = False
         self.reply_prob = 0.01
         
-    def add_badword(self,word,style=''):
+    def badword_tuple(self,word,style=''):
         word = word.lower()
         if style == '':
-            self.badwords.add(word)
+            return (word,style,word)
         elif style == 'single':
-            self.badwords.add('\s%s\s|\s%s$|^%s\s|^%s$' % (word,word,word,word))
+            return (word,style,'\s%s\s|\s%s$|^%s\s|^%s$' % (word,word,word,word))
         elif style == 'start':
-            self.badwords.add('\s%s|^%s' % (word,word))
+            return (word,style,'\s%s|^%s' % (word,word))
+        else:
+            raise RuntimeError('unknown badword style')
+        
+    def add_badword(self,word,style=''):
+        self.badwords.add(self.badword_tuple(word,style))
+        
+    def del_badword(self,word,style=''):
+        self.badwords.remove(self.badword_tuple(word,style))
         
     def update_badwords(self,c):
-        expr = '|'.join(self.badwords)
+        expr = '|'.join([regex for word,style,regex in self.badwords])
         key = self.name.upper()
         if len(expr) > 0:
             c.filter_re_map[key] = re.compile(expr)
@@ -184,6 +192,7 @@ class IRCBot:
         self.register_cmd('GIPHY',0,self.cmd_giphy)
         self.register_cmd('CHATTINESS',50,self.cmd_chattiness)
         self.register_cmd('PROFILE',50,self.cmd_profile)
+        self.register_cmd('BADWORDS',75,self.cmd_badwords)
         
         self.msg_hooks = []
         self.register_hook(self.hook_youtube)
@@ -250,13 +259,13 @@ class IRCBot:
         c.send('NOTICE',replyto,rest=response)
 
     def cmd_quit(self,c,msg,replyto,params):
-        c.send('QUIT',rest=(params if params is not None else 'Leaving.'))
+        c.send('QUIT',rest=(params if params else 'Leaving.'))
 
     def cmd_join(self,c,msg,replyto,params):
         c.send('JOIN',params)
         
     def cmd_part(self,c,msg,replyto,params):
-        c.send('PART',params if params is not None else replyto)
+        c.send('PART',params if params else replyto)
         
     def cmd_say(self,c,msg,replyto,params):
         if params is not None:
@@ -265,6 +274,40 @@ class IRCBot:
     def cmd_do(self,c,msg,replyto,params):
         if params is not None:
             c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
+            
+    def cmd_badwords(self,c,msg,replyto,params):
+        parts = deque(params.split() if params else [])
+        if replyto[0] in IRCBot.chan_prefix_chars:
+            chan_name = replyto
+        else:
+            chan_name = parts.popleft()
+        chan = self.get_chan(chan_name)
+        replyto = strip_prefix(msg.prefix)
+        cmd = parts.popleft()
+        if cmd == 'list':
+            c.send('NOTICE',replyto,rest='Badwords for %s' % chan_name)
+            for word,style,_ in chan.badwords:
+                if len(style) > 0:
+                    line = '%s (%s)'%(word,style.upper())
+                else:
+                    line = '%s'%(word,)
+                c.send('NOTICE',replyto,rest=line)
+        elif cmd == 'add':
+            if len(parts) > 1:
+                word,style = parts[0].lower(),parts[1].lower()
+            else:
+                word,style = parts[0].lower(),''
+            chan.add_badword(word,style)
+            chan.update_badwords(c)
+        elif cmd == 'del':
+            if len(parts) > 1:
+                word,style = parts[0].lower(),parts[1].lower()
+            else:
+                word,style = parts[0].lower(),''
+            chan.del_badword(word,style)
+            chan.update_badwords(c)
+        else:
+            c.send('NOTICE',replyto,rest='.badwords [channel] [list|add|del] [word]')
     
     def cmd_profile(self,c,msg,replyto,params):
         chan = self.get_chan(replyto)
