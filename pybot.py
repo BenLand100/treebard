@@ -35,23 +35,27 @@ class IRCMessage:
 
 class IRCConnection:
 
-    def __init__(self,host,port,filter_re=None):
+    def __init__(self,host,port,filter_re_map={},timeout=None):
         self.buff = ''
         self.pending = deque()
         self.last = {}
-        self.filter_re = filter_re
+        self.filter_re_map = filter_re_map
     
         self.s = socket.socket()
         self.s.connect((host, port))
+        if timeout is not None:        
+            self.s.settimeout(timeout)
     
     def send(self,cmd,*args,rest=None):
         cmd = cmd.upper()
         if cmd == 'PRIVMSG' or cmd == 'NOTICE':
-            dest = args[0]
+            dest = args[0].upper()
             if dest in self.last and self.last[dest] == rest:
+                print('XX',cmd,args,rest)
                 return
             self.last[dest] = rest
-            if self.filter_re.search(rest):
+            if dest in self.filter_re_map and self.filter_re_map[dest].search(rest):
+                print('XX',cmd,args,rest)
                 return
         if len(args) > 0:
             packet = '%s %s' % (cmd,' '.join(args))
@@ -83,6 +87,9 @@ class IRCChannel:
 
     def __init__(self,name):
         self.name = name
+        self.joined = False
+        
+        self.badwords = set()
         
         self.history = deque(maxlen=100)
         
@@ -92,17 +99,34 @@ class IRCChannel:
         self.mc = None
         self.mc_learning = False
         self.reply_prob = 0.01
+        
+    def add_badword(self,c,word,style=''):
+        word = word.lower()
+        if style == '':
+            self.badwords.add(word)
+        elif style == 'single':
+            self.badwords.add('\s%s$|^%s\s|^%s$' % (word,word,word,word))
+        elif style == 'start':
+            self.badwords.add('\s%s|^%s' % (b,b))
+        self.update_badwords(c)
+        
+    def update_badwords(self,c):
+        expr = '|'.join(self.badwords)
+        key = self.name.upper()
+        if len(expr) > 0:
+            c.filter_re_map[key] = re.compile()
+        elif key in c.filter_re_map:
+            del c.filter_re_map[key]
 
 class IRCBot:
 
-    def __init__(self,master='BenLand100',giphy_key=None,nick=None,ident=None,realname=None,filter_re=None,autojoin=None):
+    def __init__(self,master=None,giphy_key=None,nick=None,ident=None,realname=None,autojoin=None):
         self.nick = nick
         self.ident = ident
         self.realname = realname
-        self.filter_re = filter_re
         self.autojoin = autojoin
     
-        self.acl = {master.upper():1000}
+        self.acl = {master.upper():1000} if master is not None else {}
         self.giphy_key = giphy_key
         self.chans = {}
 
@@ -114,12 +138,15 @@ class IRCBot:
         del state['ctcp_handlers']
         del state['msg_hooks']
         del state['cmds']
-        del state['conn']
         return state
         
     def __setstate__(self,state):
         self.__dict__.update(state)
         self._default_handlers()
+        
+    def update_badwords(self,conn):
+        for chan in self.chans.values():
+            chan.update_badwords(conn)
         
     def get_chan(self,chan,create=True):
         key = chan.upper()
@@ -134,6 +161,10 @@ class IRCBot:
         self.handlers = {}
         self.register_handler('PING',self.handle_ping)
         self.register_handler('PRIVMSG',self.handle_privmsg)
+        self.register_handler('JOIN',self.handle_join)
+        self.register_handler('PART',self.handle_part)
+        self.register_handler('KICK',self.handle_kick)
+        self.register_handler('QUIT',self.handle_quit)
         self.register_handler('001',self.handle_init)
 
         self.ctcp_handlers = {}
@@ -142,7 +173,8 @@ class IRCBot:
         self.register_ctcp_handler('ACTION',self.ctcp_action)
             
         self.cmds = {}
-        self.register_cmd('ACCESS',0,self.cmd_access)
+        self.register_cmd('HELP',0,self.cmd_help)
+        self.register_cmd('ACCESS',10,self.cmd_access)
         self.register_cmd('QUIT',100,self.cmd_quit)
         self.register_cmd('JOIN',100,self.cmd_join)
         self.register_cmd('PART',100,self.cmd_part)
@@ -157,16 +189,23 @@ class IRCBot:
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    def connect(self,host,port):
+    def connect(self,host,port,timeout=None):
         if not (self.nick and self.ident and self.realname):
             raise RuntimeError('must specify nick, ident, and realname to connect')
-        self.conn = IRCConnection(host,port,filter_re=self.filter_re)
-        self.conn.send('NICK',self.nick)
-        self.conn.send('USER',self.ident,host,'*',rest=self.realname)
-        while True:
-            msg = self.conn.recv()
-            if msg.cmd in self.handlers:
-                self.handlers[msg.cmd](self.conn,msg)
+        conn = IRCConnection(host,port,timeout=timeout)
+        self.update_badwords(conn)
+        conn.send('NICK',self.nick)
+        conn.send('USER',self.ident,host,'*',rest=self.realname)
+        try:
+            while True:
+                msg = conn.recv()
+                if msg.cmd in self.handlers:
+                    self.handlers[msg.cmd](conn,msg)
+                if msg.cmd == 'ERROR':
+                    return True
+        except:
+            traceback.print_exc()
+            return False
         
     def register_handler(self,cmd,func):
         self.handlers[cmd.upper()] = func
@@ -201,6 +240,13 @@ class IRCBot:
         self.hook_sed(c,msg,replyto,params,action=True)
         
     ### User commands
+    
+    def cmd_help(self,c,msg,replyto,params):
+        replyto = strip_prefix(msg.prefix)
+        lvl = self.acl_level(replyto)
+        avail = [cmd for cmd,(req,*_) in self.cmds.items() if lvl >= req]
+        response = 'Avaliable commands: %s' % ', '.join(avail)
+        c.send('NOTICE',replyto,rest=response)
 
     def cmd_quit(self,c,msg,replyto,params):
         c.send('QUIT',rest=(params if params is not None else 'Leaving.'))
@@ -235,7 +281,6 @@ class IRCBot:
             if os.path.exists(path):
                 chan.mc = markov.MarkovChain(path)
                 chan.mc_learning = False
-                print(replyto)
                 c.send('PRIVMSG',replyto,rest='Now chatting like %s' % params)
     
     def cmd_chattiness(self,c,msg,replyto,params):
@@ -319,13 +364,12 @@ class IRCBot:
     
     def hook_markov(self,c,msg,replyto,text):
         chan = self.get_chan(replyto)
-        print(replyto)
         if chan.mc is None:
             return
         if chan.mc_learning:
             chan.mc.process(text)
         if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
-            seed_text = re.sub(self.nick+'[;,: ]*|<\w+>','',text,flags=re.IGNORECASE)
+            seed_text = strip_prefix(msg.prefix) + ' ' + re.sub(self.nick+'[;,: ]*|<\w+>','',text,flags=re.IGNORECASE)
             reply = chan.mc.gen_reply(seed_text)
             if reply:
                 c.send('PRIVMSG',replyto,rest=reply)
@@ -366,13 +410,37 @@ class IRCBot:
                     except:
                         traceback.print_exc()
 
+    def handle_join(self,c,msg):
+        chan = self.get_chan(msg.args[0])
+        who = strip_prefix(msg.prefix).upper()
+        if who == self.nick.upper():
+            chan.joined = True
+        
+    def handle_part(self,c,msg):
+        chan = self.get_chan(msg.args[0])
+        who = strip_prefix(msg.prefix).upper()
+        if who == self.nick.upper():
+            chan.joined = False
+
+    def handle_quit(self,c,msg):
+        chan = self.get_chan(msg.args[0])
+        who = strip_prefix(msg.prefix).upper()
+        if who == self.nick.upper():
+            chan.joined = False
+            
+    def handle_kick(self,c,msg):
+        chan = self.get_chan(msg.args[0])
+        who = strip_prefix(msg.prefix).upper()
+        if who == self.nick.upper():
+            chan.joined = False
+            
     def handle_ping(self,c,msg):
         c.send('PONG',*msg.args)
 
     def handle_init(self,c,msg):
         self.nick = msg.args[0]
         print(list(self.chans.keys()))
-        join_chans = set([chan for chan in self.chans.keys() if chan[0] in ['#','&','$']])
+        join_chans = set([chan for chan in self.chans.keys() if chan[0] in ['#','&','$'] and self.chans[chan].joined])
         if self.autojoin:
             join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
         if len(join_chans) > 0:
