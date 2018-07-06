@@ -382,8 +382,8 @@ class IRCBot:
                     rating = meta[b'avg_rating'][0]
                     c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
-    sed_re = re.compile('(?:(?:^|;)s(.)(.+?)\\1(.*?)\\1([gi0-9]*))+?;?')
-    sed_re_iter = re.compile('(?:^|;)s(.)(.+?)\\1(.*?)\\1([gi0-9]*)')
+    sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*))+?;?')
+    sed_re_iter = re.compile('(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)')
     flag_re = re.compile('g|i|[0-9]+')
     def hook_sed(self,c,msg,replyto,text,action=False):
         match = IRCBot.sed_re.fullmatch(text)
@@ -395,7 +395,7 @@ class IRCBot:
             tentative = True
             for expr_match in IRCBot.sed_re_iter.finditer(text):
                 _,expr,tmpl,flags = expr_match.groups()
-                flags = IRCBot.flag_re.findall(flags)
+                flags = IRCBot.flag_re.findall(flags.strip())
                 reexpr = re.compile(expr,flags=re.IGNORECASE if 'i' in flags else 0)
                 print(expr,tmpl,flags,'\'%s\''%msg)
                 if msg_idx is None: #try to find this regex if no regex found
@@ -514,6 +514,6 @@ class IRCBot:
         if self.autojoin:
             join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
         if len(join_chans) > 0:
-            arg = ','.join(join_chans)
-            c.send('JOIN',arg)
+            for chan in join_chans:
+                c.send('JOIN',chan)
         
