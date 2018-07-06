@@ -112,13 +112,14 @@ class IRCChannel:
     def update_badwords(self,c):
         expr = '|'.join(self.badwords)
         key = self.name.upper()
-        print(key,expr) 
         if len(expr) > 0:
             c.filter_re_map[key] = re.compile(expr)
         elif key in c.filter_re_map:
             del c.filter_re_map[key]
 
 class IRCBot:
+    
+    chan_prefix_chars = '#&$+!'
 
     def __init__(self,master=None,giphy_key=None,nick=None,ident=None,realname=None,autojoin=None):
         self.nick = nick
@@ -379,7 +380,7 @@ class IRCBot:
     def handle_privmsg(self,c,msg):
         src = strip_prefix(msg.prefix)
         dest,text = msg.args
-        if dest[0] in ['#','&','$']:
+        if dest[0] in IRCBot.chan_prefix_chars:
             replyto = dest
         else:
             replyto = src
@@ -439,8 +440,7 @@ class IRCBot:
 
     def handle_init(self,c,msg):
         self.nick = msg.args[0]
-        print(list(self.chans.keys()))
-        join_chans = set([chan for chan in self.chans.keys() if chan[0] in ['#','&','$'] and self.chans[chan].joined])
+        join_chans = set([chan for chan in self.chans.keys() if chan[0] in IRCBot.chan_prefix_chars and self.chans[chan].joined])
         if self.autojoin:
             join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
         if len(join_chans) > 0:
