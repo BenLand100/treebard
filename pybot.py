@@ -336,9 +336,11 @@ class IRCBot:
         c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%chan.reply_prob)
             
     def cmd_access(self,c,msg,replyto,params):
-        if params is None:
-            return
-        args = params.split()
+        args = params.split() if params else ''
+        if len(args) == 0:
+            replyto = strip_prefix(msg.prefix)
+            for nick,lvl in self.acl.items():
+                c.send('NOTICE',replyto,rest='%s %i'%(nick,lvl))
         if len(args) == 1:
             c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],self.acl_level(args[0])))
         elif len(args) == 2:
@@ -382,26 +384,48 @@ class IRCBot:
 
     sed_re = re.compile('(?:(?:^|;)s(.)(.+?)\\1(.*?)\\1([gi0-9]*))+?;?')
     sed_re_iter = re.compile('(?:^|;)s(.)(.+?)\\1(.*?)\\1([gi0-9]*)')
+    flag_re = re.compile('g|i|[0-9]+')
     def hook_sed(self,c,msg,replyto,text,action=False):
         match = IRCBot.sed_re.fullmatch(text)
         chan = self.get_chan(replyto)
         history = chan.history
         if match:
-            messageidx = None
+            msg = ''
+            msg_idx = None
+            tentative = True
             for expr_match in IRCBot.sed_re_iter.finditer(text):
                 _,expr,tmpl,flags = expr_match.groups()
-                if messageidx is None:
-                    reexpr = re.compile(expr)
-                    for messageidx,text in enumerate(history):
-                        if reexpr.search(text):
-                            history[messageidx] = re.sub(expr,tmpl,text)
-                            break
+                flags = IRCBot.flag_re.findall(flags)
+                reexpr = re.compile(expr,flags=re.IGNORECASE if 'i' in flags else 0)
+                print(expr,tmpl,flags,'\'%s\''%msg)
+                if msg_idx is None: #try to find this regex if no regex found
+                    for msg_idx,msg in enumerate(history):
+                        search = reexpr.search(msg)
+                        if search:
+                            break                                    
                     else:
-                        messageidx = None
-                else:
-                    history[messageidx] = re.sub(expr,tmpl,history[messageidx])
-            if messageidx is not None:
-                c.send('PRIVMSG',replyto,rest=history[messageidx])
+                        msg_idx = None
+                if msg_idx is not None: #if any regex has matched
+                    if 'g' in flags:
+                        msg = reexpr.sub(tmpl,msg)
+                        tentative = False
+                    else:
+                        int_flags = [int(flag) for flag in flags if flag.isdigit()]
+                        nth = 1 if len(int_flags) == 0 else int_flags[0]
+                        search = reexpr.search(msg)
+                        for i in range(nth-1):
+                            search = reexpr.search(msg,search.end())
+                            if search is None:
+                                break
+                        if search:
+                            print(msg[search.start():])
+                            msg = msg[:search.start()] + reexpr.sub(tmpl,msg[search.start():],count=1)
+                            tentative = False
+                        elif tentative:
+                            msg_idx = None
+            if msg_idx is not None:
+                history[msg_idx] = msg
+                c.send('PRIVMSG',replyto,rest=msg)
         else:
             if action:
                 history.appendleft('* %s %s'%(strip_prefix(msg.prefix),text))
