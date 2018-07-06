@@ -513,7 +513,7 @@ class IRCBot:
 
     def handle_init(self,c,msg):
         self.nick = msg.args[0]
-        join_chans = set([chan for chan in self.chans.keys() if chan[0] in IRCBot.chan_prefix_chars and self.chans[chan].joined])
+        join_chans = set([chan for chan in self.chans.keys() if len(chan)>0 and chan[0] in IRCBot.chan_prefix_chars and self.chans[chan].joined])
         if self.autojoin:
             join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
         if len(join_chans) > 0:
