@@ -382,8 +382,8 @@ class IRCBot:
                     rating = meta[b'avg_rating'][0]
                     c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
-    sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*))+?;?')
-    sed_re_iter = re.compile('(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)')
+    sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*)+?;?')
+    sed_re_iter = re.compile('(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*')
     flag_re = re.compile('g|i|[0-9]+')
     def hook_sed(self,c,msg,replyto,text,action=False):
         match = IRCBot.sed_re.fullmatch(text)
