@@ -62,10 +62,13 @@ class IRCConnection:
         else:
             packet = cmd
         if rest:
-            packet = '%s :%s\r\n' % (packet,rest)
+            packet = '%s :%s' % (packet,rest)
         else:
-            packet = '%s\r\n' % (packet)
-        print('<<',packet.strip())
+            packet = '%s' % (packet)
+        if len(packet) > 510:
+            packet = packet[:510]
+        print('<<',packet)
+        packet = packet + '\r\n'
         self.s.sendall(packet.encode('UTF-8'))
         
     def recv(self):
@@ -268,11 +271,11 @@ class IRCBot:
         c.send('PART',params if params else replyto)
         
     def cmd_say(self,c,msg,replyto,params):
-        if params is not None:
+        if params:
             c.send('PRIVMSG',replyto,rest=params)
             
     def cmd_do(self,c,msg,replyto,params):
-        if params is not None:
+        if params:
             c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
             
     def cmd_badwords(self,c,msg,replyto,params):
@@ -471,7 +474,7 @@ class IRCBot:
                     lvl = self.acl_level(src)
                     if req <= lvl:
                         try:
-                            handler(c,msg,replyto,params[0] if len(params) > 0 else None)
+                            handler(c,msg,replyto,params[0] if len(params) else None)
                         except:
                             traceback.print_exc()
             else: #regular messages
