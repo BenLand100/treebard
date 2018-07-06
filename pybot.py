@@ -286,7 +286,10 @@ class IRCBot:
     
     def cmd_chattiness(self,c,msg,replyto,params):
         chan = self.get_chan(replyto)
-        chan.reply_prob = float(params)
+        if params is not None:
+            params = params.strip()
+            if len(params) > 0:
+                chan.reply_prob = float(params)
         c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%chan.reply_prob)
             
     def cmd_access(self,c,msg,replyto,params):
