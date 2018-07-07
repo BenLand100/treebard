@@ -459,7 +459,8 @@ class IRCBot:
         if chan.mc_learning:
             chan.mc.process(text)
         if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
-            seed_text = strip_prefix(msg.prefix) + ' ' + re.sub(self.nick+'[;,: ]*|<\w+>','',text,flags=re.IGNORECASE)
+            seed_text = re.sub(self.nick+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
+            ' '.join(set(seed_text.split()))
             reply = chan.mc.gen_reply(seed_text)
             if reply:
                 c.send('PRIVMSG',replyto,rest=reply)

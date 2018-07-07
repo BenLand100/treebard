@@ -115,7 +115,7 @@ class MarkovChain:
             return choices(tokens,weights)[0]
         return None
           
-    def find_seed(self,tokens,min_choices=5,start_depth=4):    
+    def find_seed(self,tokens,min_choices=2,start_depth=4):    
         c = self.conn.cursor()    
         for depth in range(start_depth,0,-1):
             for attempt in range(50):
@@ -126,19 +126,23 @@ class MarkovChain:
                     return seed
         return None
                       
-    def gen_reply(self,text,min_choices=5,start_depth=4):
+    def gen_reply(self,text,min_choices=3,start_depth=4):
         tokens = self.tknzr.tokenize(text)
         if len(tokens) < 1:
             return None
         seed = self.find_seed(tokens,min_choices,start_depth)
         if seed is None:
             return None
-        while True:
-            next = self.extend(seed)
-            print(next)
-            if next:
-                seed.append(next)
-            else:
-                break
-        return ''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in seed]).strip()
+        guesses = []
+        for i in range(50):
+            guess = seed
+            while True:
+                next = self.extend(guess)
+                print(next)
+                if next:
+                    guess.append(next)
+                else:
+                    break
+            guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess]).strip())
+        return sorted(guesses,key=len)[-1]
 
