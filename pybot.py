@@ -153,7 +153,8 @@ class IRCBot:
         self.acl = {master.upper():1000} if master is not None else {}
         self.giphy_key = giphy_key
         self.chans = {}
-
+        
+        self.deferred_cmds = deque()
         self._default_handlers()
         
     def __getstate__(self):
@@ -162,10 +163,12 @@ class IRCBot:
         del state['ctcp_handlers']
         del state['msg_hooks']
         del state['cmds']
+        del state['deferred_cmds']
         return state
         
     def __setstate__(self,state):
         self.__dict__.update(state)
+        self.deferred_cmds = deque()
         self._default_handlers()
         
     def update_badwords(self,conn):
@@ -190,6 +193,7 @@ class IRCBot:
         self.register_handler('KICK',self.handle_kick)
         self.register_handler('QUIT',self.handle_quit)
         self.register_handler('001',self.handle_init)
+        self.register_handler('352',self.handle_who)
 
         self.ctcp_handlers = {}
         self.register_ctcp_handler('VERSION',self.ctcp_version)
@@ -198,7 +202,7 @@ class IRCBot:
             
         self.cmds = {}
         self.register_cmd('HELP',0,self.cmd_help)
-        self.register_cmd('ACCESS',10,self.cmd_access)
+        self.register_cmd('ACCESS',25,self.cmd_access)
         self.register_cmd('QUIT',100,self.cmd_quit)
         self.register_cmd('JOIN',100,self.cmd_join)
         self.register_cmd('PART',100,self.cmd_part)
@@ -280,7 +284,9 @@ class IRCBot:
         c.send('JOIN',params)
         
     def cmd_part(self,c,msg,replyto,params):
-        c.send('PART',params if params else replyto)
+        chan_name = params if params else replyto
+        self.get_chan(chan_name).joined = False
+        c.send('PART',chan_name)
         
     def cmd_say(self,c,msg,replyto,params):
         if params:
@@ -412,7 +418,6 @@ class IRCBot:
                 _,expr,tmpl,flags = expr_match.groups()
                 flags = IRCBot.flag_re.findall(flags.strip())
                 reexpr = re.compile(expr,flags=re.IGNORECASE if 'i' in flags else 0)
-                print(expr,tmpl,flags,'\'%s\''%msg)
                 if msg_idx is None: #try to find this regex if no regex found
                     for msg_idx,msg in enumerate(history):
                         search = reexpr.search(msg)
@@ -433,7 +438,6 @@ class IRCBot:
                             if search is None:
                                 break
                         if search:
-                            print(msg[search.start():])
                             msg = msg[:search.start()] + reexpr.sub(tmpl,msg[search.start():],count=1)
                             tentative = False
                         elif tentative:
@@ -463,7 +467,7 @@ class IRCBot:
     ### Raw message handlers
 
     def handle_privmsg(self,c,msg):
-        src = strip_prefix(msg.prefix)
+        src = strip_prefix(msg.prefix).upper()
         dest,text = msg.args
         if dest[0] in IRCBot.chan_prefix_chars:
             replyto = dest
@@ -485,17 +489,32 @@ class IRCBot:
                     req,handler = self.cmds[cmd]
                     lvl = self.acl_level(src)
                     if req <= lvl:
-                        try:
-                            handler(c,msg,replyto,params[0] if len(params) else None)
-                        except:
-                            traceback.print_exc()
+                        args = (c,msg,replyto,params[0] if len(params) else None)
+                        if req > 0: #require identified nick 
+                            self.deferred_cmds.append((src,handler,args))
+                            c.send('WHO',src)
+                        else:
+                            try:
+                                handler(*args)
+                            except:
+                                traceback.print_exc()
             else: #regular messages
                 for hook in self.msg_hooks:
                     try:
                         hook(c,msg,replyto,text)
                     except:
                         traceback.print_exc()
-
+    
+    def handle_who(self,c,msg):
+        _,chan,user,host,server,nick,mode,rest = msg.args
+        if len(self.deferred_cmds) > 0:
+            nick = nick.upper()
+            src,handler,args = self.deferred_cmds[0]
+            if src == nick:
+                self.deferred_cmds.popleft()
+                if 'r' in mode:
+                    handler(*args)
+    
     def handle_join(self,c,msg):
         chan = self.get_chan(msg.args[0])
         who = strip_prefix(msg.prefix).upper()
@@ -528,6 +547,7 @@ class IRCBot:
         join_chans = set([chan for chan in self.chans.keys() if len(chan)>0 and chan[0] in IRCBot.chan_prefix_chars and self.chans[chan].joined])
         if self.autojoin:
             join_chans.update([chan.upper() for chan in self.autojoin.split(',')])
+            self.autojoin = None
         if len(join_chans) > 0:
             for chan in join_chans:
                 c.send('JOIN',chan)
