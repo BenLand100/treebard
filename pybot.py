@@ -8,6 +8,7 @@ import urllib.request
 import markov
 import random
 import traceback
+import time
 
 from collections import deque
 
@@ -39,6 +40,7 @@ class IRCConnection:
         self.buff = ''
         self.pending = deque()
         self.last = {}
+        self.throttle = {}
         self.filter_re_map = filter_re_map
     
         self.s = socket.socket()
@@ -50,13 +52,23 @@ class IRCConnection:
         cmd = cmd.upper()
         if cmd == 'PRIVMSG' or cmd == 'NOTICE':
             dest = args[0].upper()
-            if dest in self.last and self.last[dest] == rest:
-                print('XX',cmd,args,rest)
-                return
-            self.last[dest] = rest
             if dest in self.filter_re_map and self.filter_re_map[dest].search(rest):
-                print('XX',cmd,args,rest)
+                print('FF',cmd,args,rest)
                 return
+            if dest in self.last and self.last[dest] == rest:
+                print('LL',cmd,args,rest)
+                return
+            else:
+                self.last[dest] = rest
+            if dest in self.throttle:
+                throttle = self.throttle[dest]
+                if len(throttle) == 5 and time.time() - throttle[4] <= 5:
+                    print('TT',cmd,args,rest)
+                    return
+                else:
+                    throttle.appendleft(time.time())
+            else:
+                self.throttle[dest] = deque(maxlen=5)
         if len(args) > 0:
             packet = '%s %s' % (cmd,' '.join(args))
         else:
@@ -427,7 +439,7 @@ class IRCBot:
                         elif tentative:
                             msg_idx = None
             if msg_idx is not None:
-                history[msg_idx] = msg
+                history[msg_idx] = msg if len(msg) < 512 else msg[:512]
                 c.send('PRIVMSG',replyto,rest=msg)
         else:
             if action:
