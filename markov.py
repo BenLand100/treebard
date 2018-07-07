@@ -100,11 +100,11 @@ class MarkovChain:
             self.txn.execute('COMMIT;')
             self.txn = None
         
-    def extend(self,seed,min_choices=2,start_depth=4):
+    def extend(self,seed,min_choices=2,start_depth=4,min_depth=2):
         if start_depth > len(seed):
             start_depth = len(seed)
         c = self.conn.cursor()
-        for depth in range(start_depth,0,-1):
+        for depth in range(start_depth,min_depth-1,-1):
             opts = get_next(c,seed[-depth:])
             if depth > 1 and len(opts) < min_choices:
                 continue
@@ -115,9 +115,9 @@ class MarkovChain:
             return choices(tokens,weights)[0]
         return None
           
-    def find_seed(self,tokens,min_choices=2,start_depth=4):    
+    def find_seed(self,tokens,min_choices=2,start_depth=4,min_depth=2):    
         c = self.conn.cursor()    
-        for depth in range(start_depth,0,-1):
+        for depth in range(start_depth,min_depth-1,-1):
             for attempt in range(50):
                 seed = choices(tokens,k=depth)
                 print(seed)
@@ -126,23 +126,23 @@ class MarkovChain:
                     return seed
         return None
                       
-    def gen_reply(self,text,min_choices=3,start_depth=4):
+    def gen_reply(self,text,min_seed_choices=3,min_extend_choices=2,start_depth=4,min_depth=2):
         tokens = self.tknzr.tokenize(text)
         if len(tokens) < 1:
             return None
-        seed = self.find_seed(tokens,min_choices,start_depth)
-        if seed is None:
-            return None
         guesses = []
-        for i in range(50):
-            guess = seed
+        for i in range(15):
+            print('Cycle',i)
+            guess = self.find_seed(tokens,min_seed_choices,start_depth,min_depth)
+            if guess is None:
+                continue
             while True:
-                next = self.extend(guess)
+                next = self.extend(guess,min_choices=min_extend_choices,start_depth=start_depth,min_depth=min_depth)
                 print(next)
                 if next:
                     guess.append(next)
                 else:
                     break
             guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess]).strip())
-        return sorted(guesses,key=len)[-1]
+        return sorted(guesses,key=len)[-int(len(guesses)*0.75)] if len(guesses) else None
 
