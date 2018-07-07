@@ -1,5 +1,6 @@
 import apsw
 import os
+import re
 import string
 import nltk
 import time
@@ -31,16 +32,16 @@ def create_ngram_table(c,depth):
 
 def add_statement(depth):
     ngram = ','.join(['?']*(depth+1))
-    clause = ' AND '.join(['%s==?' % name for name in string.ascii_lowercase[:depth+1]])
+    clause = ' AND '.join(['%s is ?' % name for name in string.ascii_lowercase[:depth+1]])
     return 'INSERT OR REPLACE INTO ngrams_%i VALUES (%s, COALESCE( (SELECT count FROM ngrams_%i WHERE %s), 0) + 1);' % (depth,ngram,depth,clause)
     
 def get_statement(depth):
     ngram = ','.join(['?']*(depth+1))
-    clause = ' AND '.join(['%s==?' % name for name in string.ascii_lowercase[:depth]])
+    clause = ' AND '.join(['%s is ?' % name for name in string.ascii_lowercase[:depth]])
     last = string.ascii_lowercase[depth:depth+1]
     return 'SELECT %s,count FROM ngrams_%i WHERE %s;' % (last,depth,clause)
     
-add_statements = [add_statement(depth) for depth in range(1,5)]
+add_statements = [add_statement(depth) for depth in range(1,10)]
 def add_ngrams(c,ngrams,commit=True):
     if commit:
         c.execute('BEGIN TRANSACTION;')
@@ -50,11 +51,29 @@ def add_ngrams(c,ngrams,commit=True):
     if commit:
         c.execute('COMMIT;')    
 
-get_statements = [get_statement(depth) for depth in range(1,5)]
+get_statements = [get_statement(depth) for depth in range(1,10)]
 def get_next(c,seed):
     depth = len(seed)
     return [(opt,count) for opt,count in c.execute(get_statements[depth-1],seed)]
     
+    
+class BasicTokenizer:
+    def __init__(self):
+        self.re = re.compile('https?://[^\s]+|\[[^\]]\]|[\w\d`#%\'-]+|['+string.punctuation+'\d]+[\w\d'+string.punctuation+']*',re.I)
+    
+    def tokenize(self,text):
+        return self.re.findall(text)
+        
+def get_ngram(tokens,start,nlen,maxlen):
+    if start+nlen <= maxlen-1 and start >= 0 :
+        return tokens[start:start+nlen] 
+    else:
+        if start >= 0:
+            return tokens[start:start+nlen-1]+[None]
+        elif start+nlen > maxlen-1:
+            return [None]+tokens+[None]
+        else:
+            return [None]+tokens[:nlen-1]
 
 class MarkovChain:
     def __init__(self,dbfile='markov.sqlite'):
@@ -62,13 +81,13 @@ class MarkovChain:
         self._init()
         
     def _init(self):
-        self.tknzr = TweetTokenizer()
+        self.tknzr = BasicTokenizer()
         if os.path.exists(self.dbfile):
             self.conn = apsw.Connection(self.dbfile)
         else:
             self.conn = apsw.Connection(self.dbfile)
             c = self.conn.cursor()
-            for depth in range(1,5):
+            for depth in range(1,10):
                 create_ngram_table(c,depth)
         self.txn = None
     
@@ -86,21 +105,19 @@ class MarkovChain:
         self.txn = self.conn.cursor()
         self.txn.execute('BEGIN TRANSACTION;')
 
-    def process(self,text):
-        start = time.time()
+    def process(self,text,ngrams=8):
         tokens = self.tknzr.tokenize(text)
         c = self.conn.cursor() if self.txn is None else self.txn
-        maxlen = len(tokens)
-        ngrams = [[(tokens[i:i+j+1] if i+j+1 <= maxlen else tokens[i:i+j]+[None])for i in range(maxlen+1-j)] for j in range(1,5)]
+        maxlen = len(tokens)+1
+        ngrams = [[get_ngram(tokens,start,nlen,maxlen) for start in range(-1,maxlen-nlen+1)] for nlen in range(2,min(ngrams+1,maxlen+2))]
         add_ngrams(self.conn.cursor(),ngrams,commit=(self.txn is None))
-        end = time.time()
         
     def commit(self):
         if self.txn:
             self.txn.execute('COMMIT;')
             self.txn = None
         
-    def extend(self,seed,min_choices=2,start_depth=4,min_depth=2):
+    def extend(self,seed,min_choices=2,start_depth=8,min_depth=2):
         if start_depth > len(seed):
             start_depth = len(seed)
         c = self.conn.cursor()
@@ -115,25 +132,25 @@ class MarkovChain:
             return choices(tokens,weights)[0]
         return None
           
-    def find_seed(self,tokens,min_choices=2,start_depth=4,min_depth=2):    
+    def find_seed(self,tokens,min_choices=2,start_depth=8,min_depth=2):    
         c = self.conn.cursor()    
         for depth in range(start_depth,min_depth-1,-1):
             for attempt in range(50):
-                seed = choices(tokens,k=depth)
+                seed = [None]+choices(tokens,k=depth-1)
                 print(seed)
                 opts = get_next(c,seed)
                 if len(opts) > min_choices:
                     return seed
         return None
                       
-    def gen_reply(self,text,min_seed_choices=3,min_extend_choices=2,start_depth=4,min_depth=2):
+    def gen_reply(self,text,min_seed_choices=3,min_extend_choices=2,start_depth=8,min_depth=1):
         tokens = self.tknzr.tokenize(text)
         if len(tokens) < 1:
             return None
         guesses = []
         for i in range(15):
-            print('Cycle',i)
-            guess = self.find_seed(tokens,min_seed_choices,start_depth,min_depth)
+            print('attempt',i)
+            guess = self.find_seed(tokens,min_seed_choices,start_depth,3)
             if guess is None:
                 continue
             while True:
@@ -143,6 +160,6 @@ class MarkovChain:
                     guess.append(next)
                 else:
                     break
-            guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess]).strip())
-        return sorted(guesses,key=len)[-int(len(guesses)*0.75)] if len(guesses) else None
+            guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess if i]).strip())
+        return sorted(guesses,key=len)[-1] if len(guesses) else None
 
