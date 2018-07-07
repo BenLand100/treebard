@@ -513,7 +513,10 @@ class IRCBot:
             if src == nick:
                 self.deferred_cmds.popleft()
                 if 'r' in mode:
-                    handler(*args)
+                    try:
+                        handler(*args)
+                    except:
+                        traceback.print_exc()
     
     def handle_join(self,c,msg):
         chan = self.get_chan(msg.args[0])
