@@ -138,21 +138,25 @@ class LanguageCenter:
                         self.model.fit(x,y,batch_size=mini_batch)
                         depth[len(ngram)-1] = ([],[])
                         if len(ngram) > 10 and test_seed is not None:
-                            print(self.generate(test_seed))
+                            self.generate(test_seed,verbose=True)
         
-    def generate(self,seed='',maxlen=100):
+    def generate(self,seed='',maxlen=100,verbose=False):
+        if verbose:
+            print(seed,end='',flush=True)
         generated = seed
         seed = encode_message(seed,seed=True)
         while len(generated) < maxlen:
             guess = self.model.predict(seed[np.newaxis,:])
             c = sample_state(guess[0])
-            i = c2i(c)
-            if i == c_stop:
+            if len(c) == 0:
                 break
+            i = c2i(c)
             seed = np.append(seed,i)
             generated += c
-            print(i2c(i),end='',flush=True)
-        print('\n',end='',flush=True)
+            if verbose:
+                print(i2c(i),end='',flush=True)
+        if verbose:
+            print('\n',end='',flush=True)
         return generated
         
         
