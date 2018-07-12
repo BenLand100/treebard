@@ -31,14 +31,14 @@ def extract_ngram(vec,i,length,val):
     
 def ngram_iter(text,ngram_size=None,stride=1):
     if ngram_size is None:
-        ints = [95]+[c2i(c) for c in text if c2i(c) is not None]
+        ints = [95]+[c2i(c) for c in text if c2i(c) is not None]+[96]
         yield ints
     else:
-        ints = [95]*(ngram_size-1)+[c2i(c) for c in text if c2i(c) is not None]
-        yield from (extract_ngram(ints,i,ngram_size,96) for i in range(0,len(text)-ngram_size,stride))
+        ints = [95]*(ngram_size-1)+[c2i(c) for c in text if c2i(c) is not None]+[96]
+        yield from (extract_ngram(ints,i,ngram_size,96) for i in range(0,len(ints)+1-ngram_size,stride))
         
 class LanguageCenter:
-    def __init__(self,vocab_size=97,embedding_space=100,ngram_size=40,lstm_space=700,lstm_depth=2,model='neural.h5'):
+    def __init__(self,vocab_size=97,embedding_space=100,ngram_size=40,lstm_space=700,lstm_depth=4,model='neural.h5'):
         self.model_name = model
         self.vocab_size = vocab_size
         self.embedding_space = embedding_space
@@ -53,7 +53,7 @@ class LanguageCenter:
         for i in range(lstm_depth):
             prev_layer = LSTM(lstm_space, return_sequences=True, name=('lstm_%i'%i))(prev_layer)
             lstm_layers.append(prev_layer)
-        everything = Flatten()(concatenate([embedding]+lstm_layers))
+        everything = Flatten()(concatenate([embedding,prev_layer]))
         dense = Dense(lstm_space, name='letter_dense', activation='tanh')(everything)
         output = Dense(vocab_size, name='letter_out', activation='softmax')(dense)
         self.model = Model(inputs=[ngram_input], outputs=[output])
@@ -69,7 +69,22 @@ class LanguageCenter:
         self.__dict__.update(state)
         self.model = load_model(self.model_name)
         
-    def generate(self,seed='',maxlen=500):
+    def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=100,test_seed=None):
+        x,y = [],[]
+        for msg in gen:
+            for ngram in ngram_iter(msg,self.ngram_size+1,stride):
+                if len(ngram) != self.ngram_size+1:
+                    continue
+                x.append(ngram[:self.ngram_size])
+                y.append(i2state(ngram[self.ngram_size]))
+                if len(x) == batch:
+                    x,y = np.asarray(x),np.asarray(y)
+                    self.model.fit(x,y,batch_size=mini_batch)
+                    x,y = [],[]
+                    if test_seed:
+                        print(self.generate(test_seed))
+        
+    def generate(self,seed='',maxlen=100):
         generated = seed
         seed = [c2i(c) for c in seed]
         if len(seed) < self.ngram_size:
