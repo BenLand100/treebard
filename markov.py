@@ -23,13 +23,19 @@ else:
             rnd = np.random.randint(cdf[-1],size=k)
             idx = np.digitize(rnd,cdf)
             return list(np.asarray(seq)[idx])
-            
+
+def drop_index(c,depth):
+    c.execute('DROP INDEX ngram_%i;'%(depth,))
+
+def create_index(c,depth,level=None):
+    names = string.ascii_lowercase[:level if level else min(depth+1,4)]
+    c.execute('CREATE UNIQUE INDEX ngram_%i ON ngrams_%i(%s);'%(depth,depth,','.join(names)))    
 
 def create_ngram_table(c,depth):
     names = string.ascii_lowercase[:depth+1]
     c.execute('CREATE TABLE ngrams_%i(%s, count INTEGER);'%(depth,', '.join(['%s TEXT'%var for var in names])))
-    c.execute('CREATE UNIQUE INDEX ngram_%i ON ngrams_%i(%s);'%(depth,depth,','.join(names)))
-
+    create_index(c,depth,min(4,depth+1))
+    
 def add_statement(depth):
     ngram = ','.join(['?']*(depth+1))
     clause = ' AND '.join(['%s is ?' % name for name in string.ascii_lowercase[:depth+1]])
@@ -101,8 +107,15 @@ class MarkovChain:
         self.__dict__.update(state)
         self._init()
         
-    def begin(self):
+    def begin(self,recreate_index=None):
         self.txn = self.conn.cursor()
+        if recreate_index is not None:
+            self.txn.execute('BEGIN TRANSACTION;')
+            print('creating simplified index...')
+            for depth in range(1,10):
+                drop_index(self.txn,depth)
+                create_index(self.txn,depth,level=min(recreate_index,depth+1))
+            self.txn.execute('COMMIT;')
         self.txn.execute('BEGIN TRANSACTION;')
 
     def process(self,text,ngrams=8):
@@ -112,9 +125,16 @@ class MarkovChain:
         ngrams = [[get_ngram(tokens,start,nlen,maxlen) for start in range(-1,maxlen-nlen+1)] for nlen in range(2,min(ngrams+1,maxlen+2))]
         add_ngrams(self.conn.cursor(),ngrams,commit=(self.txn is None))
         
-    def commit(self):
+    def commit(self,recreate_index=None):
         if self.txn:
             self.txn.execute('COMMIT;')
+            if recreate_index is not None:
+                self.txn.execute('BEGIN TRANSACTION;')
+                print('regenerating full index...')
+                for depth in range(1,10):
+                    drop_index(self.txn,depth)
+                    create_index(self.txn,depth,recreate_index)
+                self.txn.execute('COMMIT;')
             self.txn = None
         
     def extend(self,seed,min_choices=2,start_depth=8,min_depth=2):
