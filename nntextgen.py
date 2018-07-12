@@ -38,14 +38,14 @@ def ngram_iter(text,ngram_size=None,stride=1):
         yield from (extract_ngram(ints,i,ngram_size,96) for i in range(0,len(ints)+1-ngram_size,stride))
         
 class LanguageCenter:
-    def __init__(self,vocab_size=97,embedding_space=100,ngram_size=40,lstm_space=700,lstm_depth=4,model='neural.h5'):
+    def __init__(self,vocab_size=97,embedding_space=100,ngram_size=50,lstm_space=500,lstm_depth=4,dense_size=500,dense_depth=2,model='neural.h5'):
         self.model_name = model
         self.vocab_size = vocab_size
         self.embedding_space = embedding_space
         self.ngram_size = ngram_size
         self.lstm_space = lstm_space
         
-        ngram_input = Input(shape=(40,), name='ngram_input')
+        ngram_input = Input(shape=(self.ngram_size,), name='ngram_input')
         embedding = Embedding(output_dim=embedding_space,input_dim=vocab_size,input_length=ngram_size)(ngram_input)
         prev_layer = embedding
         lstm_layers = []
@@ -53,9 +53,14 @@ class LanguageCenter:
         for i in range(lstm_depth):
             prev_layer = LSTM(lstm_space, return_sequences=True, name=('lstm_%i'%i))(prev_layer)
             lstm_layers.append(prev_layer)
-        everything = Flatten()(concatenate([embedding,prev_layer]))
-        dense = Dense(lstm_space, name='letter_dense', activation='tanh')(everything)
-        output = Dense(vocab_size, name='letter_out', activation='softmax')(dense)
+        state_history = Flatten(name='state_history')(concatenate([embedding,prev_layer]))
+        prev_layer = state_history
+        dense_layers = []
+        assert dense_depth > 0, 'need at least one Dense layer'
+        for i in range(dense_depth):
+            prev_layer = Dense(lstm_space, name=('dense_%i'%i), activation='tanh')(prev_layer)
+            dense_layers.append(prev_layer)
+        output = Dense(vocab_size, name='letter_out', activation='softmax')(prev_layer)
         self.model = Model(inputs=[ngram_input], outputs=[output])
         self.model.compile(loss='categorical_crossentropy', optimizer='adam')
         
@@ -70,6 +75,8 @@ class LanguageCenter:
         self.model = load_model(self.model_name)
         
     def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=100,test_seed=None):
+        if test_seed is not None:
+            print(self.generate(test_seed))
         x,y = [],[]
         for msg in gen:
             for ngram in ngram_iter(msg,self.ngram_size+1,stride):
@@ -81,7 +88,7 @@ class LanguageCenter:
                     x,y = np.asarray(x),np.asarray(y)
                     self.model.fit(x,y,batch_size=mini_batch)
                     x,y = [],[]
-                    if test_seed:
+                    if test_seed is not None:
                         print(self.generate(test_seed))
         
     def generate(self,seed='',maxlen=100):
