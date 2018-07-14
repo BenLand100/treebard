@@ -136,7 +136,7 @@ class IRCChannel:
         expr = '|'.join([regex for word,style,regex in self.badwords])
         key = self.name.upper()
         if len(expr) > 0:
-            c.filter_re_map[key] = re.compile(expr)
+            c.filter_re_map[key] = re.compile(expr,re.I)
         elif key in c.filter_re_map:
             del c.filter_re_map[key]
 
