@@ -212,6 +212,7 @@ class IRCBot:
         self.register_cmd('CHATTINESS',50,self.cmd_chattiness)
         self.register_cmd('PROFILE',50,self.cmd_profile)
         self.register_cmd('BADWORDS',75,self.cmd_badwords)
+        self.register_cmd('NN',0,self.cmd_nn)
         
         self.msg_hooks = []
         self.register_hook(self.hook_youtube)
@@ -386,6 +387,19 @@ class IRCBot:
             meta = json.loads(req.read().decode('UTF-8'))
         if len(meta['data']) > 0:
             c.send('PRIVMSG',replyto,rest='%s %s'%(meta['data'][0]['images']['original']['url'], meta['data'][0]['title'].replace(' GIF','')))
+    
+    
+    def cmd_nn(self,c,msg,replyto,params):
+        if not 'nn' in self.__dict__:
+            try:
+                import nntextgen
+                self.nn = nntextgen.LanguageCenter(model='nn.h5')
+            except:
+                print('can\'t load nntextgen module')
+                self.nn = None
+                return 
+        if self.nn:
+            c.send('PRIVMSG',replyto,rest=self.nn.generate(params if params else '',temp=0.5,maxlen=250))
     
     ### Text hooks
 

@@ -1,5 +1,8 @@
 import numpy as np
 
+from keras import backend as K; 
+K.set_session(K.tf.Session(config=K.tf.ConfigProto(intra_op_parallelism_threads=4, inter_op_parallelism_threads=4)))
+
 from keras.layers import Input, Embedding, LSTM, Dense, Flatten, concatenate
 from keras.models import Model, load_model
 from keras.callbacks import ModelCheckpoint
@@ -72,6 +75,10 @@ class LanguageCenter:
         self.embedding_space = embedding_space
         self.lstm_space = lstm_space
         
+        if os.exists(model):
+            self.model = load_model(self.model_name)
+            return
+        
         ngram_input = Input(shape=(None,), name='ngram_input')
         embedding = Embedding(output_dim=embedding_space,input_dim=vocab_size+1,input_length=None)(ngram_input)
         prev_layer = embedding
@@ -140,14 +147,14 @@ class LanguageCenter:
                         if len(ngram) > 10 and test_seed is not None:
                             self.generate(test_seed,verbose=True)
         
-    def generate(self,seed='',maxlen=100,verbose=False):
+    def generate(self,seed='',maxlen=100,temp=0.5,verbose=False):
         if verbose:
             print(seed,end='',flush=True)
         generated = seed
         seed = encode_message(seed,seed=True)
         while len(generated) < maxlen:
             guess = self.model.predict(seed[np.newaxis,:])
-            c = sample_state(guess[0])
+            c = sample_state(guess[0],temperature=temp)
             if len(c) == 0:
                 break
             i = c2i(c)
