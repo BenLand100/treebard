@@ -390,14 +390,14 @@ class IRCBot:
     
     
     def cmd_nn(self,c,msg,replyto,params):
-        if not 'nn' in self.__dict__:
+        if not 'nn' in self.__dict__ or self.nn is None:
             try:
                 import nntextgen
                 self.nn = nntextgen.LanguageCenter(model='nn.h5')
             except:
                 print('can\'t load nntextgen module')
                 self.nn = None
-                return 
+                raise 
         if self.nn:
             c.send('PRIVMSG',replyto,rest=self.nn.generate(params if params else '',temp=0.5,maxlen=250))
     

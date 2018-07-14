@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 from keras import backend as K; 
@@ -75,7 +76,7 @@ class LanguageCenter:
         self.embedding_space = embedding_space
         self.lstm_space = lstm_space
         
-        if os.exists(model):
+        if os.path.exists(model):
             self.model = load_model(self.model_name)
             return
         
