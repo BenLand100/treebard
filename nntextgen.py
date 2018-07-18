@@ -79,6 +79,7 @@ class LanguageCenter:
         
         if os.path.exists(model):
             self.model = load_model(self.model_name)
+            self._thread_init()
             return
         
         ngram_input = Input(shape=(None,), name='ngram_input')
