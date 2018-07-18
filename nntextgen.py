@@ -112,28 +112,33 @@ class LanguageCenter:
         self.model = load_model(self.model_name)
         
 
-    def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=32,test_seed=None,ngram_size=50):
+    def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=32,test_seed=None,ngram_size=50,skip=0):
         if test_seed is not None:
             print(self.generate(test_seed))
         if ngram_size > 0:
             x,y = [],[]
-            for msg in gen:
+            skipping = skip!=0 if skip is not None else False
+            for imsg,msg in enumerate(gen):
                 for ngram in ngram_iter(msg,ngram_size+1,stride):
                     if len(ngram) != ngram_size+1:
                         continue
                     x.append(ngram[:-1])
                     y.append(i2state(ngram[-1]))
                     if len(x) == batch:
-                        self.model.fit(x,y,batch_size=mini_batch)
+                        if imsg > skip:
+                            skipping = False
+                        if not skipping:
+                            self.model.fit(x,y,batch_size=mini_batch)
                         x,y = [],[]
-                        if test_seed is not None:
+                        if not skipping and test_seed is not None:
                             print(self.generate(test_seed))
         else:
             max_ngram_size = -ngram_size
             depth = []
             for i in range(max_ngram_size):
                 depth.append(([],[]))
-            for msg in gen:
+            skipping = skip!=0 if skip is not None else False
+            for imsg,msg in enumerate(gen):
                 for ngram in ngram_iter(msg,ngram_size,stride):
                     if len(ngram) < 5 or len(ngram) > max_ngram_size:
                         continue
@@ -141,12 +146,17 @@ class LanguageCenter:
                     x.append(ngram[:-1])
                     y.append(i2state(ngram[-1]))
                     if len(x) == batch:
-                        print('running ngram length',len(ngram))
-                        x,y = np.asarray(x),np.asarray(y)
-                        self.model.fit(x,y,batch_size=mini_batch)
+                        if imsg > skip:
+                            skipping = False
+                        if not skipping:
+                            print('running ngram length',len(ngram))
+                            x,y = np.asarray(x),np.asarray(y)
+                            self.model.fit(x,y,batch_size=mini_batch)
                         depth[len(ngram)-1] = ([],[])
-                        if len(ngram) > 10 and test_seed is not None:
+                        if not skipping and len(ngram) > 10 and test_seed is not None:
                             self.generate(test_seed,verbose=True)
+                if imsg%1000 == 0 and imsg>0:
+                    print('processed',imsg,'messages')
         
     def generate(self,seed='',maxlen=100,temp=0.5,verbose=False):
         if verbose:
