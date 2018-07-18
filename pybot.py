@@ -12,7 +12,7 @@ import time
 import ssl
 import asyncio
 
-from threading import Thread
+from aiohttp import ClientSession
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
@@ -408,8 +408,10 @@ class IRCBot:
             chan.giphy_last = params
             args = urllib.parse.urlencode({'api_key':self.giphy_key,'q':params,'limit':1})
         url = 'https://api.giphy.com/v1/gifs/search?%s' % args
-        with urllib.request.urlopen(url) as req:
-            meta = json.loads(req.read().decode('UTF-8'))
+        async with ClientSession() as session:
+            async with session.get(url) as resp:
+                resp = await resp.read()
+        meta = json.loads(resp.decode('UTF-8'))
         if len(meta['data']) > 0:
             await c.send('PRIVMSG',replyto,rest='%s %s'%(meta['data'][0]['images']['original']['url'], meta['data'][0]['title'].replace(' GIF','')))
     
@@ -438,8 +440,10 @@ class IRCBot:
             for url in IRCBot.url_re.finditer(text):  
                 video_id = url.group(1)
                 query_url = 'https://youtube.com/get_video_info?video_id=%s' % video_id
-                with urllib.request.urlopen(query_url) as req:
-                    meta = urllib.parse.parse_qs(req.read())
+                async with ClientSession() as session:
+                    async with session.get(query_url) as resp:
+                        resp = await resp.read()
+                meta = urllib.parse.parse_qs(resp)
                 if b'view_count' in meta and b'title' in meta and b'avg_rating' in meta:
                     title = meta[b'title'][0].decode('UTF-8')
                     views = meta[b'view_count'][0]
