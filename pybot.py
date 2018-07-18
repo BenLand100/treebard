@@ -9,7 +9,11 @@ import markov
 import random
 import traceback
 import time
+import ssl
+import asyncio
 
+from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 
 class IRCMessage:
@@ -36,19 +40,22 @@ class IRCMessage:
 
 class IRCConnection:
 
-    def __init__(self,host,port,filter_re_map={},timeout=None):
+    def __init__(self,filter_re_map={}):
         self.buff = ''
         self.pending = deque()
         self.last = {}
         self.throttle = {}
         self.filter_re_map = filter_re_map
+        self.reader, self.writer = None,None
+        
+    async def connect(self,host,port,use_ssl=True,loop=None):
+        if use_ssl:
+            self.sc = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        else:
+            self.sc = None
+        self.reader, self.writer = await asyncio.open_connection(host, port, ssl=self.sc, loop=loop)
     
-        self.s = socket.socket()
-        self.s.connect((host, port))
-        if timeout is not None:        
-            self.s.settimeout(timeout)
-    
-    def send(self,cmd,*args,rest=None):
+    async def send(self,cmd,*args,rest=None):
         cmd = cmd.upper()
         if cmd == 'PRIVMSG' or cmd == 'NOTICE':
             dest = args[0].upper()
@@ -81,12 +88,14 @@ class IRCConnection:
             packet = packet[:510]
         print('<<',packet)
         packet = packet + '\r\n'
-        self.s.sendall(packet.encode('UTF-8'))
+        self.writer.write(packet.encode('UTF-8'))
+        await self.writer.drain()
         
-    def recv(self):
+    async def recv(self):
         if len(self.pending) > 0:
             return IRCMessage(self.pending.popleft())
-        self.buff = self.buff + self.s.recv(1024).decode('UTF-8',errors='ignore')
+        data = await self.reader.read(1024)
+        self.buff = self.buff + data.decode('UTF-8',errors='ignore')
         parts = self.buff.split('\r\n')
         self.buff = parts.pop() 
         self.pending.extend(parts)
@@ -164,6 +173,7 @@ class IRCBot:
         del state['msg_hooks']
         del state['cmds']
         del state['deferred_cmds']
+        del state['workers']
         return state
         
     def __setstate__(self,state):
@@ -213,30 +223,38 @@ class IRCBot:
         self.register_cmd('PROFILE',50,self.cmd_profile)
         self.register_cmd('BADWORDS',75,self.cmd_badwords)
         self.register_cmd('NN',0,self.cmd_nn)
+        self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
         
         self.msg_hooks = []
         self.register_hook(self.hook_youtube)
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    def connect(self,host,port,timeout=None):
+    async def connect(self,host,port,loop=None):
         if not (self.nick and self.ident and self.realname):
             raise RuntimeError('must specify nick, ident, and realname to connect')
-        conn = IRCConnection(host,port,timeout=timeout)
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        self.workers = ThreadPoolExecutor(max_workers=4)
+        conn = IRCConnection()
+        await conn.connect(host,port)
         self.update_badwords(conn)
-        conn.send('NICK',self.nick)
-        conn.send('USER',self.ident,host,'*',rest=self.realname)
+        await conn.send('NICK',self.nick)
+        await conn.send('USER',self.ident,host,'*',rest=self.realname)
         try:
             while True:
-                msg = conn.recv()
+                msg = await conn.recv()
                 if msg.cmd in self.handlers:
-                    self.handlers[msg.cmd](conn,msg)
+                    loop.create_task(self.handlers[msg.cmd](conn,msg))
                 if msg.cmd == 'ERROR':
                     return True
         except:
             traceback.print_exc()
             return False
         
+    async def _work_on(self,func,*args):
+        return await asyncio.get_event_loop().run_in_executor(self.workers,func,*args)
+    
     def register_handler(self,cmd,func):
         self.handlers[cmd.upper()] = func
         
@@ -260,44 +278,44 @@ class IRCBot:
         
     ### CTCP handlers
 
-    def ctcp_version(self,c,msg,replyto,params):
-        c.send('NOTICE',replyto,rest='\x01VERSION %s\x01'%self.ident)
+    async def ctcp_version(self,c,msg,replyto,params):
+        await c.send('NOTICE',replyto,rest='\x01VERSION %s\x01'%self.ident)
 
-    def ctcp_ping(self,c,msg,replyto,params):
-        c.send('NOTICE',replyto,rest='\x01PING %s\x01'%params)
+    async def ctcp_ping(self,c,msg,replyto,params):
+        await c.send('NOTICE',replyto,rest='\x01PING %s\x01'%params)
 
-    def ctcp_action(self,c,msg,replyto,params):
-        self.hook_sed(c,msg,replyto,params,action=True)
+    async def ctcp_action(self,c,msg,replyto,params):
+        await self.hook_sed(c,msg,replyto,params,action=True)
         
     ### User commands
     
-    def cmd_help(self,c,msg,replyto,params):
+    async def cmd_help(self,c,msg,replyto,params):
         replyto = strip_prefix(msg.prefix)
         lvl = self.acl_level(replyto)
         avail = [cmd for cmd,(req,*_) in self.cmds.items() if lvl >= req]
         response = 'Avaliable commands: %s' % ', '.join(avail)
-        c.send('NOTICE',replyto,rest=response)
+        await c.send('NOTICE',replyto,rest=response)
 
-    def cmd_quit(self,c,msg,replyto,params):
-        c.send('QUIT',rest=(params if params else 'Leaving.'))
+    async def cmd_quit(self,c,msg,replyto,params):
+        await c.send('QUIT',rest=(params if params else 'Leaving.'))
 
-    def cmd_join(self,c,msg,replyto,params):
-        c.send('JOIN',params)
+    async def cmd_join(self,c,msg,replyto,params):
+        await c.send('JOIN',params)
         
-    def cmd_part(self,c,msg,replyto,params):
+    async def cmd_part(self,c,msg,replyto,params):
         chan_name = params if params else replyto
         self.get_chan(chan_name).joined = False
-        c.send('PART',chan_name)
+        await c.send('PART',chan_name)
         
-    def cmd_say(self,c,msg,replyto,params):
+    async def cmd_say(self,c,msg,replyto,params):
         if params:
-            c.send('PRIVMSG',replyto,rest=params)
+            await c.send('PRIVMSG',replyto,rest=params)
             
-    def cmd_do(self,c,msg,replyto,params):
+    async def cmd_do(self,c,msg,replyto,params):
         if params:
-            c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
+            await c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
             
-    def cmd_badwords(self,c,msg,replyto,params):
+    async def cmd_badwords(self,c,msg,replyto,params):
         parts = deque(params.split() if params else [])
         if replyto[0] in IRCBot.chan_prefix_chars:
             chan_name = replyto
@@ -313,7 +331,7 @@ class IRCBot:
                     line = '%s (%s)'%(word,style.upper())
                 else:
                     line = '%s'%(word,)
-                c.send('NOTICE',replyto,rest=line)
+                await c.send('NOTICE',replyto,rest=line)
         elif cmd == 'add':
             if len(parts) > 1:
                 word,style = parts[0].lower(),parts[1].lower()
@@ -329,50 +347,57 @@ class IRCBot:
             chan.del_badword(word,style)
             chan.update_badwords(c)
         else:
-            c.send('NOTICE',replyto,rest='.badwords [channel] [list|add|del] [word]')
+            await c.send('NOTICE',replyto,rest='.badwords [channel] [list|add|del] [word]')
     
-    def cmd_profile(self,c,msg,replyto,params):
+    async def cmd_profile(self,c,msg,replyto,params):
         chan = self.get_chan(replyto)
         params = params.strip() if params is not None else ''
         if len(params) == 0:
             chan.mc = None
             chan.mc_learning = False
-            c.send('PRIVMSG',replyto,rest='Chatting deactivated')
+            await c.send('PRIVMSG',replyto,rest='Chatting deactivated')
         elif params == 'learn':
             chan.mc = markov.MarkovChain()
             chan.mc_learning = True
-            c.send('PRIVMSG',replyto,rest='Now chatting and learning')
+            await c.send('PRIVMSG',replyto,rest='Now chatting and learning')
         else:
             path = '%s.sqlite' % params.lower()
             if os.path.exists(path):
                 chan.mc = markov.MarkovChain(path)
                 chan.mc_learning = False
-                c.send('PRIVMSG',replyto,rest='Now chatting like %s' % params)
+                await c.send('PRIVMSG',replyto,rest='Now chatting like %s' % params)
     
-    def cmd_chattiness(self,c,msg,replyto,params):
+    async def cmd_chattiness(self,c,msg,replyto,params):
         chan = self.get_chan(replyto)
         if params is not None:
             params = params.strip()
             if len(params) > 0:
                 chan.reply_prob = float(params)
-        c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%chan.reply_prob)
+        await c.send('PRIVMSG',replyto,rest='Reply probability set to %0.02f'%chan.reply_prob)
+    
+    async def cmd_nn_temp(self,c,msg,replyto,params):
+        if params is not None:
+            params = params.strip()
+            if len(params) > 0:
+                self.nn_temp = float(params)
+        await c.send('PRIVMSG',replyto,rest='Neural network temperature set to %0.02f'%self.nn_temp)
             
-    def cmd_access(self,c,msg,replyto,params):
+    async def cmd_access(self,c,msg,replyto,params):
         args = params.split() if params else ''
         if len(args) == 0:
             replyto = strip_prefix(msg.prefix)
             for nick,lvl in self.acl.items():
                 c.send('NOTICE',replyto,rest='%s %i'%(nick,lvl))
         if len(args) == 1:
-            c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],self.acl_level(args[0])))
+            await c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],self.acl_level(args[0])))
         elif len(args) == 2:
             usrlvl = self.acl_level(strip_prefix(msg.prefix))
             setlvl = int(args[1])
             if setlvl < usrlvl:
                 usrlvl = self.acl_level(args[0],setlvl)
-                c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],usrlvl))
+                await c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],usrlvl))
 
-    def cmd_giphy(self,c,msg,replyto,params):
+    async def cmd_giphy(self,c,msg,replyto,params):
         if self.giphy_key is None:
             return
         chan = self.get_chan(replyto)
@@ -386,25 +411,29 @@ class IRCBot:
         with urllib.request.urlopen(url) as req:
             meta = json.loads(req.read().decode('UTF-8'))
         if len(meta['data']) > 0:
-            c.send('PRIVMSG',replyto,rest='%s %s'%(meta['data'][0]['images']['original']['url'], meta['data'][0]['title'].replace(' GIF','')))
+            await c.send('PRIVMSG',replyto,rest='%s %s'%(meta['data'][0]['images']['original']['url'], meta['data'][0]['title'].replace(' GIF','')))
     
-    
-    def cmd_nn(self,c,msg,replyto,params):
+    async def cmd_nn(self,c,msg,replyto,params):
         if not 'nn' in self.__dict__ or self.nn is None:
             try:
-                import nntextgen
-                self.nn = nntextgen.LanguageCenter(model='nn.h5')
+                def _load_nn():                
+                    import nntextgen
+                    self.nn = nntextgen.LanguageCenter(model='nn.h5')
+                await self._work_on(_load_nn)
             except:
                 print('can\'t load nntextgen module')
                 self.nn = None
                 raise 
         if self.nn:
-            c.send('PRIVMSG',replyto,rest=self.nn.generate(params if params else '',temp=0.5,maxlen=250))
+            def _generate():
+                return self.nn.generate(params if params else '',temp=self.nn_temp,maxlen=250)
+            text = await self._work_on(_generate)
+            await c.send('PRIVMSG',replyto,rest=text)
     
     ### Text hooks
 
     url_re = re.compile('(?:youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=)([^#\&\?]*)')
-    def hook_youtube(self,c,msg,replyto,text):
+    async def hook_youtube(self,c,msg,replyto,text):
         if 'youtube.com' in text or 'youtu.be' in text:
             for url in IRCBot.url_re.finditer(text):  
                 video_id = url.group(1)
@@ -415,12 +444,12 @@ class IRCBot:
                     title = meta[b'title'][0].decode('UTF-8')
                     views = meta[b'view_count'][0]
                     rating = meta[b'avg_rating'][0]
-                    c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
+                    await c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
     sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*)+?;?')
     sed_re_iter = re.compile('(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*')
     flag_re = re.compile('g|i|[0-9]+')
-    def hook_sed(self,c,msg,replyto,text,action=False):
+    async def hook_sed(self,c,msg,replyto,text,action=False):
         match = IRCBot.sed_re.fullmatch(text)
         chan = self.get_chan(replyto)
         history = chan.history
@@ -458,7 +487,7 @@ class IRCBot:
                             msg_idx = None
             if msg_idx is not None:
                 history[msg_idx] = msg if len(msg) < 512 else msg[:512]
-                c.send('PRIVMSG',replyto,rest=msg)
+                await c.send('PRIVMSG',replyto,rest=msg)
         else:
             if action:
                 history.appendleft('* %s %s'%(strip_prefix(msg.prefix),text))
@@ -466,22 +495,22 @@ class IRCBot:
                 history.appendleft('<%s> %s'%(strip_prefix(msg.prefix),text))
             
     
-    def hook_markov(self,c,msg,replyto,text):
+    async def hook_markov(self,c,msg,replyto,text):
         chan = self.get_chan(replyto)
         if chan.mc is None:
             return
         if chan.mc_learning:
-            chan.mc.process(text)
+            await self._work_on(chan.mc.process,text)
         if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
             seed_text = re.sub(self.nick+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
             ' '.join(set(seed_text.split()))
-            reply = chan.mc.gen_reply(seed_text)
+            reply = await self._work_on(chan.mc.gen_reply,seed_text)
             if reply:
-                c.send('PRIVMSG',replyto,rest=reply)
+                await c.send('PRIVMSG',replyto,rest=reply)
 
     ### Raw message handlers
 
-    def handle_privmsg(self,c,msg):
+    async def handle_privmsg(self,c,msg):
         src = strip_prefix(msg.prefix).upper()
         dest,text = msg.args
         if dest[0] in IRCBot.chan_prefix_chars:
@@ -494,7 +523,7 @@ class IRCBot:
                 ctcp = ctcp.upper()
                 if ctcp in self.ctcp_handlers:
                     try:
-                        self.ctcp_handlers[ctcp](c,msg,replyto,params[0] if len(params) else None)
+                        await self.ctcp_handlers[ctcp](c,msg,replyto,params[0] if len(params) else None)
                     except:
                         traceback.print_exc()
             elif text[0] == '.': #commands
@@ -507,20 +536,20 @@ class IRCBot:
                         args = (c,msg,replyto,params[0] if len(params) else None)
                         if req > 0: #require identified nick 
                             self.deferred_cmds.append((src,handler,args))
-                            c.send('WHO',src)
+                            await c.send('WHO',src)
                         else:
                             try:
-                                handler(*args)
+                                await handler(*args)
                             except:
                                 traceback.print_exc()
             else: #regular messages
                 for hook in self.msg_hooks:
                     try:
-                        hook(c,msg,replyto,text)
+                        await hook(c,msg,replyto,text)
                     except:
                         traceback.print_exc()
     
-    def handle_who(self,c,msg):
+    async def handle_who(self,c,msg):
         _,chan,user,host,server,nick,mode,rest = msg.args
         if len(self.deferred_cmds) > 0:
             nick = nick.upper()
@@ -529,38 +558,38 @@ class IRCBot:
                 self.deferred_cmds.popleft()
                 if 'r' in mode:
                     try:
-                        handler(*args)
+                        await handler(*args)
                     except:
                         traceback.print_exc()
     
-    def handle_join(self,c,msg):
+    async def handle_join(self,c,msg):
         chan = self.get_chan(msg.args[0])
         who = strip_prefix(msg.prefix).upper()
         if who == self.nick.upper():
             chan.joined = True
         
-    def handle_part(self,c,msg):
+    async def handle_part(self,c,msg):
         chan = self.get_chan(msg.args[0])
         who = strip_prefix(msg.prefix).upper()
         if who == self.nick.upper():
             chan.joined = False
 
-    def handle_quit(self,c,msg):
+    async def handle_quit(self,c,msg):
         chan = self.get_chan(msg.args[0])
         who = strip_prefix(msg.prefix).upper()
         if who == self.nick.upper():
             chan.joined = False
             
-    def handle_kick(self,c,msg):
+    async def handle_kick(self,c,msg):
         chan = self.get_chan(msg.args[0])
         who = strip_prefix(msg.prefix).upper()
         if who == self.nick.upper():
             chan.joined = False
             
-    def handle_ping(self,c,msg):
-        c.send('PONG',*msg.args)
+    async def handle_ping(self,c,msg):
+        await c.send('PONG',*msg.args)
 
-    def handle_init(self,c,msg):
+    async def handle_init(self,c,msg):
         self.nick = msg.args[0]
         join_chans = set([chan for chan in self.chans.keys() if len(chan)>0 and chan[0] in IRCBot.chan_prefix_chars and self.chans[chan].joined])
         if self.autojoin:
@@ -568,5 +597,5 @@ class IRCBot:
             self.autojoin = None
         if len(join_chans) > 0:
             for chan in join_chans:
-                c.send('JOIN',chan)
+                await c.send('JOIN',chan)
         

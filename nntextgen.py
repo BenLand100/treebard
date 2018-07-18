@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import tensorflow as tf
 
 from keras import backend as K; 
 K.set_session(K.tf.Session(config=K.tf.ConfigProto(intra_op_parallelism_threads=4, inter_op_parallelism_threads=4)))
@@ -100,17 +101,23 @@ class LanguageCenter:
         output = Dense(vocab_size, name='letter_out', activation='softmax')(prev_layer)
         self.model = Model(inputs=[ngram_input], outputs=[output])
         self.model.compile(loss='categorical_crossentropy', optimizer='adam')
+        self._thread_init()
         
     def __getstate__(self):
         state = self.__dict__.copy()
         del state['model']
+        del state['graph']
         self.model.save(self.model_name)
         return state
         
     def __setstate__(self,state):
         self.__dict__.update(state)
         self.model = load_model(self.model_name)
+        self._thread_init()
         
+    def _thread_init(self):
+        self.model._make_predict_function()
+        self.graph = tf.get_default_graph()        
 
     def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=32,test_seed=None,ngram_size=50,skip=0):
         if test_seed is not None:
@@ -163,16 +170,17 @@ class LanguageCenter:
             print(seed,end='',flush=True)
         generated = seed
         seed = encode_message(seed,seed=True)
-        while len(generated) < maxlen:
-            guess = self.model.predict(seed[np.newaxis,:])
-            c = sample_state(guess[0],temperature=temp)
-            if len(c) == 0:
-                break
-            i = c2i(c)
-            seed = np.append(seed,i)
-            generated += c
-            if verbose:
-                print(i2c(i),end='',flush=True)
+        with self.graph.as_default():
+            while len(generated) < maxlen:
+                guess = self.model.predict(seed[np.newaxis,:])
+                c = sample_state(guess[0],temperature=temp)
+                if len(c) == 0:
+                    break
+                i = c2i(c)
+                seed = np.append(seed,i)
+                generated += c
+                if verbose:
+                    print(i2c(i),end='',flush=True)
         if verbose:
             print('\n',end='',flush=True)
         return generated
