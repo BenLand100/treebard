@@ -214,6 +214,7 @@ class IRCBot:
         self.register_cmd('HELP',0,self.cmd_help)
         self.register_cmd('ACCESS',25,self.cmd_access)
         self.register_cmd('QUIT',100,self.cmd_quit)
+        self.register_cmd('RECONNECT',100,self.cmd_reconnect)
         self.register_cmd('JOIN',100,self.cmd_join)
         self.register_cmd('PART',100,self.cmd_part)
         self.register_cmd('SAY',0,self.cmd_say)
@@ -230,11 +231,12 @@ class IRCBot:
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    async def connect(self,host,port,loop=None):
+    async def connect(self,host,port,loop=None,timeout=60):
         if not (self.nick and self.ident and self.realname):
             raise RuntimeError('must specify nick, ident, and realname to connect')
         if loop is None:
             loop = asyncio.get_event_loop()
+        self.clean_exit = False
         self.workers = ThreadPoolExecutor(max_workers=4)
         conn = IRCConnection()
         await conn.connect(host,port)
@@ -243,11 +245,14 @@ class IRCBot:
         await conn.send('USER',self.ident,host,'*',rest=self.realname)
         try:
             while True:
-                msg = await conn.recv()
+                try:
+                    msg = await asyncio.wait_for(conn.recv(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    return False
                 if msg.cmd in self.handlers:
                     loop.create_task(self.handlers[msg.cmd](conn,msg))
                 if msg.cmd == 'ERROR':
-                    return True
+                    return self.clean_exit
         except:
             traceback.print_exc()
             return False
@@ -296,7 +301,12 @@ class IRCBot:
         response = 'Avaliable commands: %s' % ', '.join(avail)
         await c.send('NOTICE',replyto,rest=response)
 
+    async def cmd_reconnect(self,c,msg,replyto,params):
+        self.clean_exit = False
+        await c.send('QUIT',rest=(params if params else 'BRB'))
+        
     async def cmd_quit(self,c,msg,replyto,params):
+        self.clean_exit = True
         await c.send('QUIT',rest=(params if params else 'Leaving.'))
 
     async def cmd_join(self,c,msg,replyto,params):
