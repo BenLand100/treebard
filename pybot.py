@@ -231,7 +231,7 @@ class IRCBot:
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    async def connect(self,host,port,loop=None,timeout=60):
+    async def connect(self,host,port,loop=None,timeout=120):
         if not (self.nick and self.ident and self.realname):
             raise RuntimeError('must specify nick, ident, and realname to connect')
         if loop is None:
