@@ -117,6 +117,8 @@ class IRCChannel:
         
         self.history = deque(maxlen=100)
         
+        self.mute = set() #put tokens for things to mute in here
+        
         self.giphy_last = ''
         self.giphy_last_count = 0
         
@@ -148,6 +150,19 @@ class IRCChannel:
             c.filter_re_map[key] = re.compile(expr,re.I)
         elif key in c.filter_re_map:
             del c.filter_re_map[key]
+    
+    def set_mute(self,token,muted=True):
+        if 'mute' not in self.__dict__:
+            self.mute = set()
+        if muted:
+            self.mute.add(token)
+        else:
+            self.mute.discard(token)
+    
+    def get_mute(self,token):
+        if 'mute' not in self.__dict__:
+            self.mute = set()
+        return token in self.mute
 
 class IRCBot:
     
@@ -225,13 +240,15 @@ class IRCBot:
         self.register_cmd('BADWORDS',75,self.cmd_badwords)
         self.register_cmd('NN',0,self.cmd_nn)
         self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
+        self.register_cmd('MUTE',75,self.cmd_mute)
+        self.register_cmd('UNMUTE',75,self.cmd_unmute)
         
         self.msg_hooks = []
         self.register_hook(self.hook_youtube)
         self.register_hook(self.hook_sed)
         self.register_hook(self.hook_markov)
         
-    async def connect(self,host,port,loop=None,timeout=120):
+    async def connect(self,host,port,loop=None,timeout=240):
         if not (self.nick and self.ident and self.realname):
             raise RuntimeError('must specify nick, ident, and realname to connect')
         if loop is None:
@@ -324,6 +341,23 @@ class IRCBot:
     async def cmd_do(self,c,msg,replyto,params):
         if params:
             await c.send('PRIVMSG',replyto,rest='\x01ACTION %s\x01'%params)
+            
+    async def cmd_mute(self,c,msg,replyto,params):
+        chan = self.get_chan(replyto)
+        if params and len(params.strip()) > 0:
+            params = params.strip().lower()
+            chan.set_mute(params)
+            await c.send('PRIVMSG',replyto,rest='Muted %s'%params)
+        else:
+            mutes = ', '.join(list(chan.mute))
+            await c.send('NOTICE',strip_prefix(msg.prefix),rest='Current mutes for %s: %s'%(replyto,mutes))
+            
+    async def cmd_unmute(self,c,msg,replyto,params):
+        if params:
+            chan = self.get_chan(replyto)
+            params = params.strip().lower()
+            chan.set_mute(params,False)
+            await c.send('PRIVMSG',replyto,rest='Unmuted %s'%params)
             
     async def cmd_badwords(self,c,msg,replyto,params):
         parts = deque(params.split() if params else [])
@@ -436,7 +470,8 @@ class IRCBot:
                 print('can\'t load nntextgen module')
                 self.nn = None
                 raise 
-        if self.nn:
+        chan = self.get_chan(replyto)
+        if not chan.get_mute('neural') and self.nn:
             def _generate():
                 return self.nn.generate(params if params else '',temp=self.nn_temp,maxlen=250)
             text = await self._work_on(_generate)
@@ -447,18 +482,20 @@ class IRCBot:
     url_re = re.compile('(?:youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=)([^#\&\?]*)')
     async def hook_youtube(self,c,msg,replyto,text):
         if 'youtube.com' in text or 'youtu.be' in text:
-            for url in IRCBot.url_re.finditer(text):  
-                video_id = url.group(1)
-                query_url = 'https://youtube.com/get_video_info?video_id=%s' % video_id
-                async with ClientSession() as session:
-                    async with session.get(query_url) as resp:
-                        resp = await resp.read()
-                meta = urllib.parse.parse_qs(resp)
-                if b'view_count' in meta and b'title' in meta and b'avg_rating' in meta:
-                    title = meta[b'title'][0].decode('UTF-8')
-                    views = meta[b'view_count'][0]
-                    rating = meta[b'avg_rating'][0]
-                    await c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
+            chan = self.get_chan(replyto)
+            if not chan.get_mute('youtube'):
+                for url in IRCBot.url_re.finditer(text):  
+                    video_id = url.group(1)
+                    query_url = 'https://youtube.com/get_video_info?video_id=%s' % video_id
+                    async with ClientSession() as session:
+                        async with session.get(query_url) as resp:
+                            resp = await resp.read()
+                    meta = urllib.parse.parse_qs(resp)
+                    if b'view_count' in meta and b'title' in meta and b'avg_rating' in meta:
+                        title = meta[b'title'][0].decode('UTF-8')
+                        views = meta[b'view_count'][0]
+                        rating = meta[b'avg_rating'][0]
+                        await c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
     sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*)+?;?')
     sed_re_iter = re.compile('(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*')
@@ -467,7 +504,7 @@ class IRCBot:
         match = IRCBot.sed_re.fullmatch(text)
         chan = self.get_chan(replyto)
         history = chan.history
-        if match:
+        if not chan.get_mute('sed') and match:
             msg = ''
             msg_idx = None
             tentative = True
@@ -515,12 +552,13 @@ class IRCBot:
             return
         if chan.mc_learning:
             await self._work_on(chan.mc.process,text)
-        if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
-            seed_text = re.sub(self.nick+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
-            ' '.join(set(seed_text.split()))
-            reply = await self._work_on(chan.mc.gen_reply,seed_text)
-            if reply:
-                await c.send('PRIVMSG',replyto,rest=reply)
+        if not chan.get_mute('markov'):
+            if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
+                seed_text = re.sub(self.nick+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
+                ' '.join(set(seed_text.split()))
+                reply = await self._work_on(chan.mc.gen_reply,seed_text)
+                if reply:
+                    await c.send('PRIVMSG',replyto,rest=reply)
 
     ### Raw message handlers
 

@@ -121,6 +121,7 @@ class MarkovChain:
     def process(self,text,ngrams=8):
         tokens = self.tknzr.tokenize(text)
         c = self.conn.cursor() if self.txn is None else self.txn
+        print(c,self.txn)
         maxlen = len(tokens)+1
         ngrams = [[get_ngram(tokens,start,nlen,maxlen) for start in range(-1,maxlen-nlen+1)] for nlen in range(2,min(ngrams+1,maxlen+2))]
         add_ngrams(c,ngrams,commit=(self.txn is None))
@@ -157,7 +158,6 @@ class MarkovChain:
         for depth in range(start_depth,min_depth-1,-1):
             for attempt in range(50):
                 seed = [None]+choices(tokens,k=depth-1)
-                print(seed)
                 opts = get_next(c,seed)
                 if len(opts) > min_choices:
                     return seed
@@ -169,17 +169,18 @@ class MarkovChain:
             return None
         guesses = []
         for i in range(15):
-            print('attempt',i)
+            print('attempt %i: '%(i+1),end='')
             guess = self.find_seed(tokens,min_seed_choices,start_depth,3)
             if guess is None:
                 continue
             while True:
                 next = self.extend(guess,min_choices=min_extend_choices,start_depth=start_depth,min_depth=min_depth)
-                print(next)
+                print(next,end=' ')
                 if next:
                     guess.append(next)
                 else:
                     break
+            print()
             guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess if i]).strip())
         return sorted(guesses,key=len)[-1] if len(guesses) else None
 
