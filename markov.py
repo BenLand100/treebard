@@ -49,13 +49,18 @@ def get_statement(depth):
     
 add_statements = [add_statement(depth) for depth in range(1,10)]
 def add_ngrams(c,ngrams,commit=True):
-    if commit:
-        c.execute('BEGIN TRANSACTION;')
-    for igrams,statement in zip(ngrams,add_statements):
-        for igram in igrams:
-            c.execute(statement,igram*2)
-    if commit:
-        c.execute('COMMIT;')    
+    try:
+        if commit:
+            c.execute('BEGIN TRANSACTION;')
+        for igrams,statement in zip(ngrams,add_statements):
+            for igram in igrams:
+                c.execute(statement,igram*2)
+        if commit:
+            c.execute('COMMIT;')
+    except:
+        if commit:
+            c.execute('ROLLBACK;')   
+        raise 
 
 get_statements = [get_statement(depth) for depth in range(1,10)]
 def get_next(c,seed):
@@ -172,6 +177,7 @@ class MarkovChain:
             print('attempt %i: '%(i+1),end='')
             guess = self.find_seed(tokens,min_seed_choices,start_depth,3)
             if guess is None:
+                print('***no seed***')
                 continue
             while True:
                 next = self.extend(guess,min_choices=min_extend_choices,start_depth=start_depth,min_depth=min_depth)
