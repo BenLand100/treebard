@@ -124,7 +124,17 @@ class IRCChannel:
         
         self.mc = None
         self.mc_learning = False
+        self.mc_lock = asyncio.Lock()
         self.reply_prob = 0.01
+        
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['mc_lock']
+        return state
+        
+    def __setstate__(self,state):
+        self.__dict__.update(state)
+        self.mc_lock = asyncio.Lock()
         
     def badword_tuple(self,word,style=''):
         word = word.lower()
@@ -551,7 +561,8 @@ class IRCBot:
         if chan.mc is None:
             return
         if chan.mc_learning:
-            await self._work_on(chan.mc.process,text)
+            with chan.mc_lock:
+                await self._work_on(chan.mc.process,text)
         if not chan.get_mute('markov'):
             if random.random() < chan.reply_prob or self.nick.upper() in text.upper():
                 seed_text = re.sub(self.nick+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
