@@ -561,7 +561,7 @@ class IRCBot:
         if chan.mc is None:
             return
         if chan.mc_learning:
-            with chan.mc_lock:
+            async with chan.mc_lock:
                 await self._work_on(chan.mc.process,text)
         if not chan.get_mute('markov'):
             if random.random() < chan.reply_prob or self.nick.upper() in text.upper():

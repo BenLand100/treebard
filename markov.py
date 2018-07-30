@@ -126,7 +126,6 @@ class MarkovChain:
     def process(self,text,ngrams=8):
         tokens = self.tknzr.tokenize(text)
         c = self.conn.cursor() if self.txn is None else self.txn
-        print(c,self.txn)
         maxlen = len(tokens)+1
         ngrams = [[get_ngram(tokens,start,nlen,maxlen) for start in range(-1,maxlen-nlen+1)] for nlen in range(2,min(ngrams+1,maxlen+2))]
         add_ngrams(c,ngrams,commit=(self.txn is None))
