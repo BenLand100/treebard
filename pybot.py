@@ -501,9 +501,10 @@ class IRCBot:
                         async with session.get(query_url) as resp:
                             resp = await resp.read()
                     meta = urllib.parse.parse_qs(resp)
-                    if b'view_count' in meta and b'title' in meta and b'avg_rating' in meta:
-                        title = meta[b'title'][0].decode('UTF-8')
-                        views = meta[b'view_count'][0]
+                    if b'player_response' in meta and b'avg_rating' in meta:
+                        details = json.loads(meta[b'player_response'][0])['videoDetails']
+                        title = details['title']
+                        views = details['viewCount']
                         rating = meta[b'avg_rating'][0]
                         await c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
