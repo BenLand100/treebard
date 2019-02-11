@@ -500,12 +500,12 @@ class IRCBot:
                     async with ClientSession() as session:
                         async with session.get(query_url) as resp:
                             resp = await resp.read()
-                    meta = urllib.parse.parse_qs(resp)
-                    if b'player_response' in meta and b'avg_rating' in meta:
-                        details = json.loads(meta[b'player_response'][0])['videoDetails']
+                    meta = urllib.parse.parse_qs(resp.decode('UTF-8',errors='ignore'))
+                    if 'player_response' in meta and 'avg_rating' in meta:
+                        details = json.loads(meta['player_response'][0])['videoDetails']
                         title = details['title']
                         views = details['viewCount']
-                        rating = meta[b'avg_rating'][0]
+                        rating = meta['avg_rating'][0]
                         await c.send('PRIVMSG',replyto,rest='"%s" - %0.1f / 5.0 - %i views - https://youtu.be/%s'%(title,float(rating),int(views),video_id))
 
     sed_re = re.compile('(?:(?:^|;)\s*s(.)(.+?)\\1(.*?)\\1([gi0-9]*)\s*)+?;?')
