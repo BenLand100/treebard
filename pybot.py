@@ -592,9 +592,7 @@ class IRCBot:
                 return
                 
             #check for commands after a preamble
-            print(text)
             for match in IRCBot.cmd_re.finditer(text):
-                print(match)
                 cmd,*params = text[match.start(1):].split(' ',1)
                 cmd = cmd.upper()
                 if cmd in self.cmds:
