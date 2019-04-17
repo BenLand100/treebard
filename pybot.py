@@ -572,7 +572,7 @@ class IRCBot:
                     await c.send('PRIVMSG',replyto,rest=reply)
 
     ### Raw message handlers
-
+    cmd_re = re.compile('\\.(\\S+)')
     async def handle_privmsg(self,c,msg):
         src = strip_prefix(msg.prefix).upper()
         dest,text = msg.args
@@ -589,8 +589,13 @@ class IRCBot:
                         await self.ctcp_handlers[ctcp](c,msg,replyto,params[0] if len(params) else None)
                     except:
                         traceback.print_exc()
-            elif text[0] == '.': #commands
-                cmd,*params = text[1:].split(' ',1)
+                return
+                
+            #check for commands after a preamble
+            print(text)
+            for match in IRCBot.cmd_re.finditer(text):
+                print(match)
+                cmd,*params = text[match.start(1):].split(' ',1)
                 cmd = cmd.upper()
                 if cmd in self.cmds:
                     req,handler = self.cmds[cmd]
@@ -605,12 +610,14 @@ class IRCBot:
                                 await handler(*args)
                             except:
                                 traceback.print_exc()
-            else: #regular messages
-                for hook in self.msg_hooks:
-                    try:
-                        await hook(c,msg,replyto,text)
-                    except:
-                        traceback.print_exc()
+                    return
+                    
+            #regular messages
+            for hook in self.msg_hooks:
+                try:
+                    await hook(c,msg,replyto,text)
+                except:
+                    traceback.print_exc()
     
     async def handle_who(self,c,msg):
         _,chan,user,host,server,nick,mode,rest = msg.args
