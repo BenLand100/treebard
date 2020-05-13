@@ -188,6 +188,8 @@ class IRCBot:
         self.giphy_key = giphy_key
         self.chans = {}
         
+        self.nn_temp = 0.7
+        
         self.deferred_cmds = deque()
         self._default_handlers()
         

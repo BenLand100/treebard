@@ -2,9 +2,6 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from keras import backend as K; 
-K.set_session(K.tf.Session(config=K.tf.ConfigProto(intra_op_parallelism_threads=4, inter_op_parallelism_threads=4)))
-
 from keras.layers import Input, Embedding, LSTM, Dense, Flatten, concatenate
 from keras.models import Model, load_model
 from keras.callbacks import ModelCheckpoint
@@ -77,11 +74,12 @@ class LanguageCenter:
         self.embedding_space = embedding_space
         self.lstm_space = lstm_space
         
+        self._thread_init()
+        
         if os.path.exists(model):
             self.model = load_model(self.model_name)
-            self._thread_init()
             return
-        
+            
         ngram_input = Input(shape=(None,), name='ngram_input')
         embedding = Embedding(output_dim=embedding_space,input_dim=vocab_size+1,input_length=None)(ngram_input)
         prev_layer = embedding
@@ -102,7 +100,6 @@ class LanguageCenter:
         output = Dense(vocab_size, name='letter_out', activation='softmax')(prev_layer)
         self.model = Model(inputs=[ngram_input], outputs=[output])
         self.model.compile(loss='categorical_crossentropy', optimizer='adam')
-        self._thread_init()
         
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -113,12 +110,11 @@ class LanguageCenter:
         
     def __setstate__(self,state):
         self.__dict__.update(state)
-        self.model = load_model(self.model_name)
         self._thread_init()
+        self.model = load_model(self.model_name)
         
     def _thread_init(self):
-        self.model._make_predict_function()
-        self.graph = tf.get_default_graph()        
+        self.graph = tf.compat.v1.get_default_graph()   
 
     def train_from_gen(self,gen,stride=1,batch=5000,mini_batch=32,test_seed=None,ngram_size=50,skip=0):
         if test_seed is not None:
@@ -171,17 +167,16 @@ class LanguageCenter:
             print(seed,end='',flush=True)
         generated = seed
         seed = encode_message(seed,seed=True)
-        with self.graph.as_default():
-            while len(generated) < maxlen:
-                guess = self.model.predict(seed[np.newaxis,:])
-                c = sample_state(guess[0],temperature=temp)
-                if len(c) == 0:
-                    break
-                i = c2i(c)
-                seed = np.append(seed,i)
-                generated += c
-                if verbose:
-                    print(i2c(i),end='',flush=True)
+        while len(generated) < maxlen:
+            guess = self.model.predict(seed[np.newaxis,:])
+            c = sample_state(guess[0],temperature=temp)
+            if len(c) == 0:
+                break
+            i = c2i(c)
+            seed = np.append(seed,i)
+            generated += c
+            if verbose:
+                print(i2c(i),end='',flush=True)
         if verbose:
             print('\n',end='',flush=True)
         return generated
