@@ -10,6 +10,8 @@ from nltk.tokenize import TweetTokenizer
 #from nltk.tokenize.moses import MosesTokenizer
 #from nltk.tokenize.moses import MosesDetokenizer
 
+nick_remover = re.compile('<.+>[ ,:]*')
+
 if hasattr(random,'choices'):
     choices = random.choices
 else:
@@ -124,6 +126,7 @@ class MarkovChain:
         self.txn.execute('BEGIN TRANSACTION;')
 
     def process(self,text,ngrams=8):
+        text = nick_remover.sub('',text)
         tokens = self.tknzr.tokenize(text)
         c = self.conn.cursor() if self.txn is None else self.txn
         maxlen = len(tokens)+1
