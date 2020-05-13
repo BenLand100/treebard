@@ -409,6 +409,9 @@ class IRCBot:
         chan = self.get_chan(replyto)
         params = params.strip() if params is not None else ''
         if len(params) == 0:
+            if chan.mc and chan.mc_learning:
+                await c.send('PRIVMSG',replyto,rest='Learning to chat')
+        if params == 'disable':
             chan.mc = None
             chan.mc_learning = False
             await c.send('PRIVMSG',replyto,rest='Chatting deactivated')

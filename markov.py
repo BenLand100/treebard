@@ -142,7 +142,7 @@ class MarkovChain:
                 self.txn.execute('COMMIT;')
             self.txn = None
         
-    def extend(self,seed,min_choices=2,start_depth=8,min_depth=2):
+    def extend(self,seed,min_choices=2,start_depth=8,min_depth=1,prefer=None):
         if start_depth > len(seed):
             start_depth = len(seed)
         c = self.conn.cursor()
@@ -152,7 +152,10 @@ class MarkovChain:
                 continue
             if depth == 1 and len(opts) == 0:
                 return None
-            weights = [weight for token,weight in opts]
+            if prefer is None:
+                weights = [weight for token,weight in opts]
+            else:
+                weights = [weight if token not in prefer else 5*weight for token,weight in opts]
             tokens = [token for token,weight in opts]
             return choices(tokens,weights)[0]
         return None
@@ -171,21 +174,15 @@ class MarkovChain:
         tokens = self.tknzr.tokenize(text)
         if len(tokens) < 1:
             return None
-        guesses = []
-        for i in range(15):
-            print('attempt %i: '%(i+1),end='')
-            guess = self.find_seed(tokens,min_seed_choices,start_depth,3)
-            if guess is None:
-                print('***no seed***')
-                continue
-            while True:
-                next = self.extend(guess,min_choices=min_extend_choices,start_depth=start_depth,min_depth=min_depth)
-                print(next,end=' ')
-                if next:
-                    guess.append(next)
-                else:
-                    break
-            print()
-            guesses.append(''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess if i]).strip())
-        return sorted(guesses,key=len)[-1] if len(guesses) else None
-
+        print('attempt: ',end='')
+        guess = [None]
+        while True:
+            next = self.extend(guess,min_choices=min_extend_choices,start_depth=start_depth,min_depth=min_depth,prefer=tokens)
+            print(next,end=' ')
+            if next:
+                guess.append(next)
+            else:
+                break
+        print()
+        return ''.join([' '+i if not i.startswith("'") and i not in string.punctuation else i for i in guess if i]).strip()
+        
