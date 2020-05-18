@@ -99,7 +99,6 @@ class DiscordBot:
         
         self._default_handlers()
         
-        self.workers = ThreadPoolExecutor(max_workers=4)
         self.mc = MarkovChain()
         
         self.seq_num = None
@@ -191,6 +190,7 @@ class DiscordBot:
         if loop is None:
             loop = asyncio.get_event_loop()
         conn = DiscordConnection()
+        self.workers = ThreadPoolExecutor(max_workers=4)
         await conn.connect(self.bot_token,api_version=6)
         while True:
             msg = await conn.recv()
