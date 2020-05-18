@@ -156,14 +156,14 @@ class DiscordBot:
     async def _work_on(self,func,*args):
         return await asyncio.get_event_loop().run_in_executor(self.workers,func,*args)
         
-    async def _post(self,target,data={}):
+    async def _post(self,target,data={},api_version=6):
         async with ClientSession(headers={'Authorization':'Bot %s'%self.bot_token}) as session:
-            async with session.post('https://discord.com/api/v7'+target, data=data) as resp:
+            async with session.post('https://discord.com/api/v'+str(api_version)+target, data=data) as resp:
                 return await resp.json()
                 
-    async def _get(self,target,data={}):
+    async def _get(self,target,data={},api_version=6):
         async with ClientSession(headers={'Authorization':'Bot %s'%self.bot_token}) as session:
-            async with session.get('https://discord.com/api/v7'+target, data=data) as resp:
+            async with session.get('https://discord.com/api/v'+str(api_version)+target, data=data) as resp:
                 return await resp.json()
                 
     def register_cmd(self,cmd,req,func):
