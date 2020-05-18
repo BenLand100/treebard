@@ -21,6 +21,7 @@ class SRLApprove:
         cp_pass = creds['cp_pass']
         vb_user = creds['vb_user']
         vb_pass_md5 = creds['vb_pass_md5']
+        self.fourm_loc = creds['forum_loc']
         
         self._basic_auth = BasicAuth(cp_user,cp_pass)
         self._login_data = {'logintype':'cplogin','do':'login',
@@ -30,10 +31,10 @@ class SRLApprove:
     async def approve(self,approve_name):
         jar = aiohttp.CookieJar()
         async with aiohttp.ClientSession(cookie_jar=jar,auth=self._basic_auth) as s:
-            async with s.post('https://villavu.com/forum/login.php?do=login',data=self._login_data) as r:
+            async with s.post(self.fourm_loc+'login.php?do=login',data=self._login_data) as r:
                 await r.read()
                 
-            async with s.get('https://villavu.com/forum/adm/user.php?do=moderate') as r:
+            async with s.get(self.fourm_loc+'/adm/user.php?do=moderate') as r:
                 moderate_page = await r.text()
             
             moderate_page = moderate_page.split('\n')
@@ -50,7 +51,7 @@ class SRLApprove:
             for user,uid in users.items():
                 post_data['validate[%s]'%uid] = '1' if uid == approve_id else '0'
                 
-            async with s.post('https://villavu.com/forum/adm/user.php?do=moderate',data=post_data) as r:
+            async with s.post(self.forum_loc+'/adm/user.php?do=moderate',data=post_data) as r:
                 await r.read()
                 
 if __name__ == "__main__":
