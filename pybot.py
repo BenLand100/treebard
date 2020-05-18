@@ -240,6 +240,7 @@ class IRCBot:
         self.cmds = {}
         self.register_cmd('HELP',0,self.cmd_help)
         self.register_cmd('ACCESS',25,self.cmd_access)
+        self.register_cmd('APPROVE',25,self.cmd_approve)
         self.register_cmd('QUIT',100,self.cmd_quit)
         self.register_cmd('RECONNECT',100,self.cmd_reconnect)
         self.register_cmd('JOIN',100,self.cmd_join)
@@ -440,6 +441,14 @@ class IRCBot:
             if len(params) > 0:
                 self.nn_temp = float(params)
         await c.send('PRIVMSG',replyto,rest='Neural network temperature set to %0.02f'%self.nn_temp)
+    
+    async def cmd_approve(self,c,msg,replyto,params):
+        args = params.split() if params else ''
+        if len(args) == 1:
+            import srl_approve
+            a = srl_approve.SRLApprove()
+            await c.send('PRIVMSG',replyto,rest='Approving %s'%(args[0]))
+            await a.approve(args[0])
             
     async def cmd_access(self,c,msg,replyto,params):
         args = params.split() if params else ''
