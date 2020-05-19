@@ -254,7 +254,7 @@ class DiscordBot:
         print('Invalidating session')
         self.session_id = None
         self.seq_num = None
-        raise websockets.WebSocketException('Invalid session')
+        await self.send_identify(ws)
         
     async def handle_heartbeat(self,ws,msg):   
         await ws.send(op=11)
