@@ -95,6 +95,7 @@ class Guild:
 class DiscordBot:
     def __init__(self,bot_token,master=None):
         self.bot_token = bot_token
+        self.session_id = None
         self.acl = {master.upper():1000} if master is not None else {}
         
         self._default_handlers()
@@ -117,6 +118,7 @@ class DiscordBot:
         self.handlers = {}
         self.register_handler(0,self.handle_event)  
         self.register_handler(1,self.handle_heartbeat)  
+        self.register_handler(9,self.handle_invalid)  
         self.register_handler(10,self.handle_hello)   
         self.register_handler(11,self.handle_heartbeat_ack)   
         self.register_handler(0,self.handle_event)  
@@ -189,16 +191,21 @@ class DiscordBot:
     async def connect(self,api_version=6,loop=None):
         if loop is None:
             loop = asyncio.get_event_loop()
-        conn = DiscordConnection()
         self.workers = ThreadPoolExecutor(max_workers=4)
-        await conn.connect(self.bot_token,api_version=6)
-        while True:
-            msg = await conn.recv()
-            self.seq_num = msg['s']
-            if msg['op'] in self.handlers:
-                loop.create_task(self.handlers[msg['op']](conn,msg))
+        self.reconnect = True
+        while self.reconnect:
+            try:
+                conn = DiscordConnection()
+                await conn.connect(self.bot_token,api_version=6)
+                while True:
+                    msg = await conn.recv()
+                    if msg['s'] is not None:
+                        self.seq_num = msg['s']
+                    if msg['op'] in self.handlers:
+                        loop.create_task(self.handlers[msg['op']](conn,msg))
+            except websockets.WebSocketException as e:
+                traceback.print_exc()
            
-        
     async def send_message(self,channel,content):
         return await self._post('/channels/%s/messages'%channel,{'content':content})
              
@@ -219,6 +226,14 @@ class DiscordBot:
             'intents': 0x7FFF
             }
         await ws.send(2,identify)
+        
+    async def send_resume(self,ws):
+        resume = {
+            'token':self.bot_token,
+            'session_id':self.session_id,
+            'seq':self.seq_num
+            }
+        await ws.send(6,resume)
            
     async def handle_hello(self,ws,msg):
         self.hb_every = msg['d']['heartbeat_interval']
@@ -226,11 +241,20 @@ class DiscordBot:
         if self.hb_task:
             self.hb_task.cancel()
         self.hb_task = asyncio.get_event_loop().create_task(self.send_heartbeat(ws))
-        await self.send_identify(ws)
+        print('Last Session:',self.session_id,self.seq_num)
+        if self.session_id is None or self.seq_num is None:
+            await self.send_identify(ws)
+        else:
+            await self.send_resume(ws)
     
     async def handle_heartbeat_ack(self,ws,msg):
         self.heartbeat_ack = True
     
+    async def handle_invalid(self,ws,msg):
+        print('Invalidating session')
+        self.session_id = None
+        self.seq_num = None
+        
     async def handle_heartbeat(self,ws,msg):   
         await ws.send(op=11)
     
@@ -244,6 +268,7 @@ class DiscordBot:
             print('>>',ev)
     
     async def ev_ready(self,ws,msg):
+        self.session_id = msg['session_id']
         me = await self._get('/users/@me')
         self.ident = (me['username'],me['discriminator'],me['username'])
         self.ident_id = me['id']
@@ -253,7 +278,7 @@ class DiscordBot:
     async def ev_guild_create(self,ws,msg):
         guild = Guild(msg)
         self.guilds[msg['id']] = guild
-        print('Created:',guild.name)
+        print('Guild:',guild.name)
         print('\t',len(guild.channels),' channels')
         print('\t',len(guild.members),' members')
     
@@ -273,9 +298,9 @@ class DiscordBot:
         if msg['type'] != 0:
             print('what is this message type: ',msg)
             return
+        author_id = msg['author']['id']
         guild_id = msg['guild_id']
         channel_id = msg['channel_id']
-        author_id = msg['author']['id']
         guild = self.guilds[guild_id] if guild_id in self.guilds else None
         if guild is None:
             print('what is this message: ',msg)
@@ -290,6 +315,8 @@ class DiscordBot:
         text = guild.to_text(content)
         
         print('#%s <%s (%s#%s)> : %s'%(channel,author[2],author[0],author[1],text))
+        if author_id == self.ident_id:
+            return
             
         #check for commands after a preamble
         for match in self.cmd_re.finditer(content):
@@ -336,7 +363,7 @@ class DiscordBot:
             await self.approver.approve(args)
     
     async def hook_markov(self,guild,channel_id,author_id,text):
-        text = re.sub(r'^\*\*<.+>\*\* *','',text)
+        text = re.sub(r'^\*\*<.+>\*\* *','',text) #strip ircbot nick prefix
         await self._work_on(self.mc.process,text)
         if self.ident[2].upper() in text.upper():
             seed_text = re.sub(self.ident[2]+'[;,: ]*|[<>\\/\|\?.,\(\)!@#\$\%^&\*]','',text,flags=re.IGNORECASE)
