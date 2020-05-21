@@ -125,6 +125,7 @@ class DiscordBot:
         
         self.events = {}
         self.register_event('READY',self.ev_ready)  
+        self.register_event('TYPING_START',self.ev_typing_start)
         self.register_event('MESSAGE_CREATE',self.ev_message_create)
         self.register_event('GUILD_CREATE',self.ev_guild_create)
         self.register_event('GUILD_MEMBER_ADD',self.ev_guild_member_add)
@@ -295,6 +296,21 @@ class DiscordBot:
         if msg['guild_id'] in self.guilds:
             self.guilds[msg['guild_id']].member_update(msg)
     
+    async def ev_typing_start(self,ws,msg):
+        author_id = msg['user_id']
+        guild_id = msg['guild_id']
+        guild = self.guilds[guild_id] if guild_id in self.guilds else None
+        if guild is None:
+            print('what is this message: ',msg)
+            return
+        channel_id = msg['channel_id']
+        channel = guild.channels[channel_id]
+        if author_id not in guild.members:
+            print('who is this user: ', msg['author'])
+            return
+        author = guild.members[author_id]
+        print('<%s (%s#%s)> typing in #%s'%(author[2],author[0],author[1],channel))
+        
     async def ev_message_create(self,ws,msg):
         if msg['type'] != 0:
             print('what is this message type: ',msg)
