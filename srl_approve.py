@@ -52,7 +52,7 @@ class SRLApprove:
             for user,uid in users.items():
                 post_data['validate[%s]'%uid] = '1' if uid == approve_id else '0'
                 
-            async with s.post(self.forum_loc+'/adm/user.php?do=moderate',data=post_data) as r:
+            async with s.post(self.fourm_loc+'/adm/user.php?do=moderate',data=post_data) as r:
                 await r.read()
                 
 if __name__ == "__main__":
