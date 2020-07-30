@@ -31,7 +31,7 @@ class SRLApprove:
     async def approve(self,approve_name):
         jar = aiohttp.CookieJar()
         async with aiohttp.ClientSession(cookie_jar=jar,auth=self._basic_auth) as s:
-            async with s.post(self.fourm_loc+'login.php?do=login',data=self._login_data) as r:
+            async with s.post(self.fourm_loc+'/login.php?do=login',data=self._login_data) as r:
                 await r.read()
                 
             async with s.get(self.fourm_loc+'/adm/user.php?do=moderate') as r:
@@ -43,6 +43,7 @@ class SRLApprove:
             if (key:= approve_name.lower()) not in users:
                 return False
             approve_id = users[key]
+            print('%s is %s'%(approve_name,approve_id))
             
             post_data = {m.group(1):m.group(2) for line in moderate_page if (m := security_re.match(line))}
             post_data['send_deleted'] = 1
@@ -51,7 +52,7 @@ class SRLApprove:
             for user,uid in users.items():
                 post_data['validate[%s]'%uid] = '1' if uid == approve_id else '0'
                 
-            async with s.post(self.forum_loc+'/adm/user.php?do=moderate',data=post_data) as r:
+            async with s.post(self.fourm_loc+'/adm/user.php?do=moderate',data=post_data) as r:
                 await r.read()
                 
 if __name__ == "__main__":
