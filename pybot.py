@@ -447,8 +447,11 @@ class IRCBot:
         if len(args) == 1:
             import srl_approve
             a = srl_approve.SRLApprove()
-            await c.send('PRIVMSG',replyto,rest='Approving %s'%(args[0]))
-            await a.approve(args[0])
+            result = await a.approve(args[0])
+            if result:
+                await c.send('PRIVMSG',replyto,rest='Approved %s'%(args[0]))
+            else:
+                await c.send('PRIVMSG',replyto,rest='Failed to approve %s'%(args[0]))
             
     async def cmd_access(self,c,msg,replyto,params):
         args = params.split() if params else ''

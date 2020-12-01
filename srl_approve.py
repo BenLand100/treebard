@@ -53,7 +53,8 @@ class SRLApprove:
                 post_data['validate[%s]'%uid] = '1' if uid == approve_id else '0'
                 
             async with s.post(self.fourm_loc+'/adm/user.php?do=moderate',data=post_data) as r:
-                await r.read()
+                response = await r.read()
+                return b'User accounts validated and users notified.' in response
                 
 if __name__ == "__main__":
     a = SRLApprove()

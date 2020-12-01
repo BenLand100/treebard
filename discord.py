@@ -376,8 +376,11 @@ class DiscordBot:
     async def cmd_approve(self,guild,channel_id,author_id,args):
         args = args.strip()
         if len(args) > 0:
-            await self.send_message(channel_id,'Approving %s for <@!%s>'%(args,author_id))
-            await self.approver.approve(args)
+            result = await self.approver.approve(args)
+            if result:
+                await self.send_message(channel_id,'Approved %s for <@!%s>'%(args,author_id))
+            else:
+                await self.send_message(channel_id,'Failed to approve %s for <@!%s>'%(args,author_id))
     
     async def hook_markov(self,guild,channel_id,author_id,text):
         text = re.sub(r'^\*\*<.+>\*\* *','',text) #strip ircbot nick prefix
