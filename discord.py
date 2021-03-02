@@ -360,8 +360,10 @@ class DiscordBot:
     async def cmd_access(self,guild,channel_id,author_id,args):
         args = args.split() if args else ''
         if len(args) == 0:
+            msg = []
             for user_id,lvl in self.acl.items():
-                await self.send_message(channel_id,'%s %i'%(guild.get_member_name(user_id),lvl))
+                msg.append('%s %i'%(guild.get_member_name(user_id),lvl))
+            await self.send_message(channel_id,'\n'.join(msg))
         elif len(args) == 1:
             user_id = re.sub(r'<@!?(.*)>',r'\1',args[0])
             await self.send_message(channel_id,'<@!%s> has access level %i'%(user_id,self.acl_level(user_id)))
