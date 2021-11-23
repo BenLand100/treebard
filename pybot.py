@@ -251,8 +251,8 @@ class IRCBot:
         self.register_cmd('CHATTINESS',50,self.cmd_chattiness)
         self.register_cmd('PROFILE',50,self.cmd_profile)
         self.register_cmd('BADWORDS',75,self.cmd_badwords)
-        self.register_cmd('NN',0,self.cmd_nn)
-        self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
+        #self.register_cmd('NN',0,self.cmd_nn)
+        #self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
         self.register_cmd('MUTE',75,self.cmd_mute)
         self.register_cmd('UNMUTE',75,self.cmd_unmute)
         
@@ -382,7 +382,7 @@ class IRCBot:
         replyto = strip_prefix(msg.prefix)
         cmd = parts.popleft()
         if cmd == 'list':
-            c.send('NOTICE',replyto,rest='Badwords for %s' % chan_name)
+            await c.send('NOTICE',replyto,rest='Badwords for %s' % chan_name)
             for word,style,_ in chan.badwords:
                 if len(style) > 0:
                     line = '%s (%s)'%(word,style.upper())
@@ -458,7 +458,7 @@ class IRCBot:
         if len(args) == 0:
             replyto = strip_prefix(msg.prefix)
             for nick,lvl in self.acl.items():
-                c.send('NOTICE',replyto,rest='%s %i'%(nick,lvl))
+                await c.send('NOTICE',replyto,rest='%s %i'%(nick,lvl))
         if len(args) == 1:
             await c.send('PRIVMSG',replyto,rest='%s has access level %i'%(args[0],self.acl_level(args[0])))
         elif len(args) == 2:
