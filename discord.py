@@ -102,6 +102,8 @@ class DiscordBot:
         
         self.mc = MarkovChain()
         
+        self.nn_temp = 0.7
+        
         self.seq_num = None
         self.hb_every = -1
         self.hb_task = None
@@ -136,6 +138,8 @@ class DiscordBot:
         self.cmds = {}
         self.register_cmd('APPROVE',25,self.cmd_approve)
         self.register_cmd('ACCESS',25,self.cmd_access)
+        self.register_cmd('NN',0,self.cmd_nn)
+        self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
         
         self.msg_hooks = []
         self.register_hook(self.hook_markov)
@@ -148,6 +152,7 @@ class DiscordBot:
         del state['msg_hooks']
         del state['workers']
         del state['hb_task']
+        del state['nn']
         return state
         
     def __setstate__(self,state):
@@ -383,7 +388,32 @@ class DiscordBot:
                 await self.send_message(channel_id,'Approved %s for <@!%s>'%(args,author_id))
             else:
                 await self.send_message(channel_id,'Failed to approve %s for <@!%s>'%(args,author_id))
+                
+    async def cmd_nn_temp(self,guild,channel_id,author_id,args):
+        args = args.strip()
+        if len(args) > 0:
+            self.nn_temp = float(args)
+        await self.send_message(channel_id,'Neural network temperature set to %0.02f'%self.nn_temp)
     
+    async def cmd_nn(self,guild,channel_id,author_id,args):
+        if not 'nn' in self.__dict__ or self.nn is None:
+            try:
+                def _load_nn():                
+                    import nntextgen
+                    self.nn = nntextgen.LanguageCenter(model='nn.h5')
+                await self._work_on(_load_nn)
+            except:
+                print('can\'t load nntextgen module')
+                self.nn = None
+                raise 
+        if not 'nn_temp' in self.__dict__:
+            self.nn_temp = 0.7
+        if self.nn:
+            def _generate():
+                return self.nn.generate(args if args else '',temp=self.nn_temp,maxlen=250)
+            text = await self._work_on(_generate)
+            await self.send_message(channel_id,text)
+            
     async def hook_markov(self,guild,channel_id,author_id,text):
         text = re.sub(r'^\*\*<.+>\*\* *','',text) #strip ircbot nick prefix
         await self._work_on(self.mc.process,text)
