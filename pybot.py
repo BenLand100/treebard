@@ -252,8 +252,8 @@ class IRCBot:
         self.register_cmd('CHATTINESS',50,self.cmd_chattiness)
         self.register_cmd('PROFILE',50,self.cmd_profile)
         self.register_cmd('BADWORDS',75,self.cmd_badwords)
-        self.register_cmd('NN',0,self.cmd_nn)
-        self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
+        #self.register_cmd('NN',0,self.cmd_nn)
+        #self.register_cmd('NN-TEMP',10,self.cmd_nn_temp)
         self.register_cmd('MUTE',75,self.cmd_mute)
         self.register_cmd('UNMUTE',75,self.cmd_unmute)
         
