@@ -201,7 +201,8 @@ class IRCBot:
         del state['cmds']
         del state['deferred_cmds']
         del state['workers']
-        del state['nn']
+        if 'nn' in state:
+            del state['nn']
         return state
         
     def __setstate__(self,state):

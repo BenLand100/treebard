@@ -152,7 +152,8 @@ class DiscordBot:
         del state['msg_hooks']
         del state['workers']
         del state['hb_task']
-        del state['nn']
+        if 'nn' in state:
+            del state['nn']
         return state
         
     def __setstate__(self,state):
