@@ -53,7 +53,7 @@ class IRCConnection:
             self.sc = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         else:
             self.sc = None
-        self.reader, self.writer = await asyncio.open_connection(host, port, ssl=self.sc, loop=loop)
+        self.reader, self.writer = await asyncio.open_connection(host, port, ssl=self.sc)
     
     async def send(self,cmd,*args,rest=None):
         cmd = cmd.upper()
