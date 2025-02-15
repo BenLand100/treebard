@@ -33,6 +33,39 @@ class SRLApprove:
         async with aiohttp.ClientSession(cookie_jar=jar,auth=self._basic_auth) as s:
             async with s.post(self.fourm_loc+'/login.php?do=login',data=self._login_data) as r:
                 await r.read()
+
+            async with s.post(self.fourm_loc+'/adm/user.php') as r:
+                user_page = await r.text()
+
+            post_data = {m.group(1):m.group(2) for line in user_page.split('\n') if (m := security_re.match(line))}
+            post_data['do'] = "find"
+            post_data['user[exact]'] = 'Exact+Match'
+            post_data['user[username]'] = approve_name
+
+            async with s.post(self.fourm_loc+'/adm/user.php?do=find',data=post_data) as r:
+                user_page = await r.text()
+
+            post_data = {m.group(1):m.group(2) for line in user_page.split('\n') if (m := security_re.match(line))}
+
+            existing_gid = post_data['ousergroupid']
+            if existing_gid not in {
+                '3', # Awaiting Email
+                '4' # Awaiting Moderation
+            }:
+                return False # No other groups are valid targets
+
+            post_data['do'] = 'update'
+            post_data['user[usergroupid]'] = '2' # Registered User
+
+            async with s.post(self.fourm_loc+'/adm/user.php?do=update',data=post_data) as r:
+                response = await r.read()
+                return b'Saved User <i></i> Successfully' in response
+
+    async def moderate(self,approve_name): # This is fully broken on the VB side
+        jar = aiohttp.CookieJar()
+        async with aiohttp.ClientSession(cookie_jar=jar,auth=self._basic_auth) as s:
+            async with s.post(self.fourm_loc+'/login.php?do=login',data=self._login_data) as r:
+                await r.read()
                 
             async with s.get(self.fourm_loc+'/adm/user.php?do=moderate') as r:
                 moderate_page = await r.text()
